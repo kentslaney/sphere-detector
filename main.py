@@ -80,5 +80,20 @@ def slide(arr):
     slider.on_changed(update)
     plt.show()
 
+def density(arr, samples=100, scale=4):
+    d0, d1 = partials(arr)
+    t = np.linspace(0, scale, samples)
+    out = np.zeros((samples,) + arr.shape)
+    for i in range(samples):
+        out[i] = normals(d0, d1, t[i])
+    return out
+
+def blur(arr, sigma=3):
+    from scipy.ndimage import gaussian_filter
+    return gaussian_filter(arr, sigma=sigma)
+
+def ndmax(arr):
+    return np.unravel_index(arr.argmax(), arr.shape)
+
 if __name__ == "__main__":
     slide(a)
