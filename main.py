@@ -58,10 +58,20 @@ def normals(d0, d1, t):
     return out
 
 def slide(arr):
-    from matplotlib.widgets import Slider
+    frame = np.ones_like(arr)
+    d0, d1 = partials(arr)
+
+    from matplotlib.widgets import Slider, Button
     fig, ax = plt.subplots()
-    out = ax.imshow(np.ones_like(arr), vmin=0, vmax=4)
+    out = ax.imshow(frame, vmin=0, vmax=4)
     fig.subplots_adjust(bottom=0.25)
+
+    def onclick(event):
+        if event.inaxes != ax:
+            return
+        ix, iy = event.xdata, event.ydata
+        print(f'x = {ix}, y = {iy}')
+    fig.canvas.mpl_connect('button_press_event', onclick)
 
     axt = fig.add_axes([0.1, 0.1, 0.8, 0.03])
     slider = Slider(
@@ -71,13 +81,21 @@ def slide(arr):
         valmax=8,
         valinit=0,
     )
-
-    d0, d1 = partials(arr)
     def update(val):
-        out.set_data(normals(d0, d1, slider.val))
+        nonlocal frame
+        frame = normals(d0, d1, slider.val)
+        out.set_data(frame)
         fig.canvas.draw_idle()
-
     slider.on_changed(update)
+
+    bax = fig.add_axes([0.8, 0.025, 0.1, 0.04])
+    button = Button(bax, 'overlay', hovercolor='0.975')
+    def bev(event):
+        lim = np.percentile(frame, 99)
+        out.set_data((frame > lim) * 100)
+        fig.canvas.draw_idle()
+    button.on_clicked(bev)
+
     plt.show()
 
 def density(arr, samples=100, scale=4):
