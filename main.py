@@ -43,8 +43,8 @@ def partials(arr):
 
 def normals(d0, d1, t):
     out = np.zeros_like(d0)
-    t *= np.sqrt(np.sum(np.array(out.shape) ** 2))
-    c1, c0 = np.meshgrid(*map(np.arange, out.shape[::-1]))
+    t *= np.sqrt(np.sum(np.array(d0.shape) ** 2))
+    c1, c0 = np.meshgrid(*map(np.arange, d0.shape[::-1]))
     e0, e1 = (c0 + d0 * t).flatten(), (c1 + d1 * t).flatten()
     f0, f1 = np.int32(np.floor(e0)), np.int32(np.floor(e1))
     g0, g1 = e0 - f0, e1 - f1
@@ -56,6 +56,12 @@ def normals(d0, d1, t):
         w = np.logical_and(x0, x1)
         out[z0[w], z1[w]] += y0[w] * y1[w]
     return out
+
+def sources(d0, d1, t, s1, s0):
+    t *= np.sqrt(np.sum(np.array(d0.shape) ** 2))
+    c1, c0 = np.meshgrid(*map(np.arange, d0.shape[::-1]))
+    e0, e1 = c0 + d0 * t, c1 + d1 * t
+    return np.log(np.sqrt((e0 - s0) ** 2 + (e1 - s1) ** 2))
 
 def slide(arr):
     frame = np.ones_like(arr)
@@ -69,8 +75,8 @@ def slide(arr):
     def onclick(event):
         if event.inaxes != ax:
             return
-        ix, iy = event.xdata, event.ydata
-        print(f'x = {ix}, y = {iy}')
+        out.set_data(sources(d0, d1, slider.val, event.xdata, event.ydata))
+        fig.canvas.draw_idle()
     fig.canvas.mpl_connect('button_press_event', onclick)
 
     axt = fig.add_axes([0.1, 0.1, 0.8, 0.03])
@@ -89,10 +95,9 @@ def slide(arr):
     slider.on_changed(update)
 
     bax = fig.add_axes([0.8, 0.025, 0.1, 0.04])
-    button = Button(bax, 'overlay', hovercolor='0.975')
+    button = Button(bax, 'reset', hovercolor='0.975')
     def bev(event):
-        lim = np.percentile(frame, 99)
-        out.set_data((frame > lim) * 100)
+        out.set_data(frame)
         fig.canvas.draw_idle()
     button.on_clicked(bev)
 
