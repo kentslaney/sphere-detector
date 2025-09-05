@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 local = pathlib.Path(__file__).parents[0]
 mlmodel = None
+target = np.array([392, 518])
 
 def mlpackage():
     global Image
@@ -23,7 +24,6 @@ def fs(pth, npy = None):
     if mlmodel is None:
         mlmodel = mlpackage()
     im = Image.open(pth)
-    target = np.array([518, 392])
     size = np.array(im.size)
     scaled = np.int32(np.max(target / size) * size)
     im_s = im.resize(scaled)
@@ -34,8 +34,8 @@ def fs(pth, npy = None):
         np.save(npy, out)
     return out
 
-a = fs(local / "IMG_0004.HEIC", local / "out4.npy")
-b = fs(local / "IMG_0005.HEIC", local / "out5.npy")
+im4 = fs(local / "IMG_0004.HEIC", local / "out4.npy")
+im5 = fs(local / "IMG_0005.HEIC", local / "out5.npy")
 
 def partials(arr):
     from scipy.ndimage import sobel
@@ -118,5 +118,17 @@ def blur(arr, sigma=3):
 def ndmax(arr):
     return np.unravel_index(arr.argmax(), arr.shape)
 
+def fake_sphere(r=np.min(target) // 5):
+    out = np.zeros(target)
+    c1, c0 = np.meshgrid(*map(np.arange, target[::-1]))
+    t0, t1 = target // 2
+    d2 = (t0 - c0) ** 2 + (t1 - c1) ** 2
+    out[d2 < r ** 2] = np.sqrt(r ** 2 - d2[d2 < r ** 2])
+    out *= 0.8 / np.max(out)
+    return out
+
+def tmp():
+    slide(fake_sphere())
+
 if __name__ == "__main__":
-    slide(a)
+    slide(im4)
