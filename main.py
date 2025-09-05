@@ -27,8 +27,8 @@ def fs(pth, npy = None):
     size = np.array(im.size)
     scaled = np.int32(np.max(target / size) * size)
     im_s = im.resize(scaled)
-    origin = (scaled - target) // 2
-    im_t = im_s.crop(np.concat((origin, origin + target)))
+    origin = (scaled - target[::-1]) // 2
+    im_t = im_s.crop(np.concat((origin, origin + target[::-1])))
     out = np.array(mlmodel.predict({"image": im_t})['depth'])
     if npy is not None:
         np.save(npy, out)
