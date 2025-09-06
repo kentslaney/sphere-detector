@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 local = pathlib.Path(__file__).parents[0]
 mlmodel = None
 target = np.array([392, 518])
+diag = np.sqrt(np.sum(target ** 2))
 
 def mlpackage():
     global Image
@@ -42,24 +43,24 @@ def partials(arr):
     return sobel(arr, 0), sobel(arr, 1)
 
 def normals(d0, d1, t):
-    out = np.zeros_like(d0)
-    t *= np.sqrt(np.sum(np.array(d0.shape) ** 2))
-    c1, c0 = np.meshgrid(*map(np.arange, d0.shape[::-1]))
+    out = np.zeros(target)
+    t *= diag
+    c1, c0 = np.meshgrid(*map(np.arange, target[::-1]))
     e0, e1 = (c0 + d0 * t).flatten(), (c1 + d1 * t).flatten()
     f0, f1 = np.int32(np.floor(e0)), np.int32(np.floor(e1))
     g0, g1 = e0 - f0, e1 - f1
     for i0, i1 in [[0, 0], [0, 1], [1, 0], [1, 1]]:
         z0, z1 = f0 + i0, f1 + i1
         y0, y1 = (1 - i0) + (2 * i0 - 1) * g0, (1 - i1) + (2 * i1 - 1) * g1
-        x0 = np.logical_and(z0 >= 0, z0 < out.shape[0])
-        x1 = np.logical_and(z1 >= 0, z1 < out.shape[1])
+        x0 = np.logical_and(z0 >= 0, z0 < target[0])
+        x1 = np.logical_and(z1 >= 0, z1 < target[1])
         w = np.logical_and(x0, x1)
         out[z0[w], z1[w]] += y0[w] * y1[w]
     return out
 
 def sources(d0, d1, t, s1, s0):
-    t *= np.sqrt(np.sum(np.array(d0.shape) ** 2))
-    c1, c0 = np.meshgrid(*map(np.arange, d0.shape[::-1]))
+    t *= diag
+    c1, c0 = np.meshgrid(*map(np.arange, target[::-1]))
     e0, e1 = c0 + d0 * t, c1 + d1 * t
     return np.log(np.sqrt((e0 - s0) ** 2 + (e1 - s1) ** 2))
 
