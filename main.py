@@ -132,14 +132,8 @@ def tmp0():
     slide(fake_sphere())
 
 # https://www.desmos.com/c/h0pkuzhfzh
-# w=3
-# f\left(x\right)=\frac{\sqrt{1-x^{2}}}{w}
-# \left(a+\frac{f'\left(a\right)t}{\sqrt{1+f'\left(a\right)^{2}}},
-#       \ f\left(a\right)-\frac{t}{\sqrt{1+f'\left(a\right)^{2}}}\right)
-# a=0.42
-# g\left(x\right)=w^{2}f'\left(x\right)
-# \left(a+\frac{g\left(a\right)t}{\sqrt{1+g\left(a\right)^{2}}},
-#      \ f\left(a\right)-\frac{t}{\sqrt{1+g\left(a\right)^{2}}}\right)
+# https://www.desmos.com/3d/9ijh5b7ok9
+# m = ∂∥∂∥ / (∂⟂∂⟂)^3 * ∂∥ wrt gradient
 
 def tmp1(im):
     for i in im:
