@@ -128,8 +128,23 @@ def fake_sphere(r=np.min(target) // 5):
     out *= 0.8 / np.max(out)
     return out
 
-def tmp():
+def tmp0():
     slide(fake_sphere())
+
+# https://www.desmos.com/c/h0pkuzhfzh
+# w=3
+# f\left(x\right)=\frac{\sqrt{1-x^{2}}}{w}
+# \left(a+\frac{f'\left(a\right)t}{\sqrt{1+f'\left(a\right)^{2}}},
+#       \ f\left(a\right)-\frac{t}{\sqrt{1+f'\left(a\right)^{2}}}\right)
+# a=0.42
+# g\left(x\right)=w^{2}f'\left(x\right)
+# \left(a+\frac{g\left(a\right)t}{\sqrt{1+g\left(a\right)^{2}}},
+#      \ f\left(a\right)-\frac{t}{\sqrt{1+g\left(a\right)^{2}}}\right)
+
+def tmp1(im):
+    for i in im:
+        plt.plot(i)
+    plt.show()
 
 if __name__ == "__main__":
     slide(im4)
