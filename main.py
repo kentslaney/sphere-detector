@@ -42,12 +42,13 @@ def partials(arr):
     from scipy.ndimage import sobel
     return sobel(arr, 0), sobel(arr, 1)
 
-def hessian(arr):
+def hessian(d0, d1):
     from scipy.ndimage import sobel
-    return list(map(partials, partials(arr)))
+    return list(map(partials, [d0, d1]))
 
 # https://people.math.harvard.edu/~knill/teaching/math21b2004/exhibits/2dmatrices/index.html
 # L = T / 2 \pm (T ** 2 / 4 - D) ** 1/2
+# λ[0] = ∂⟂∂⟂ <= ∂∥∂∥ = λ[1]
 def eigenvalues2x2(sq):
     tr = sq[0][0] + sq[1][1]
     det = sq[0][0] * sq[1][1] - sq[0][1] * sq[1][0]
