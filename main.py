@@ -50,7 +50,7 @@ def hessian(arr):
 # L = T / 2 \pm (T ** 2 / 4 - D) ** 1/2
 def eigenvalues2x2(sq):
     tr = sq[0][0] + sq[1][1]
-    det = tr - sq[0][1] * sq[1][0]
+    det = sq[0][0] * sq[1][1] - sq[0][1] * sq[1][0]
     center = tr / 2
     radius = np.sqrt(tr ** 2 / 4 - det)
     return [center - radius, center + radius]
