@@ -1,1 +1,1 @@
-# git-nug
+# Spheroid depth test
