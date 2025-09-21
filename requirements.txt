@@ -5,3 +5,4 @@ pillow_heif
 coremltools
 scipy
 armpit
+sympy
