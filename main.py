@@ -133,9 +133,11 @@ def adjust(arr):
     coef = (cos2 - 1) / (d0 ** 2 + d1 ** 2)
     return d0 * coef, d1 * coef
 
-def slide1(arr):
+def slide1(arr, **kw):
     s0, s1 = adjust(arr)
-    return slide(partial(casts, arr, s0, s1), valmin=0, valmax=1, valinit=0.1)
+    defaults = { "valmin": 0, "valmax": 1, "valinit": 0.1 }
+    defaults = {i: j for i, j in defaults.items() if i not in kw}
+    return slide(partial(casts, arr, s0, s1), **kw, **defaults)
 
 def density(arr, samples=100, scale=4):
     d0, d1 = grad(arr)
@@ -214,6 +216,12 @@ class Sphere:
         return [i[a, b] for i in self.approx], \
                 self.subs(a, b).T.evalf().tolist()[0]
 
+class Concave(Sphere):
+    @cached_property
+    def im(self):
+        arr = super().im
+        return np.where(arr < float(self.offset) / 2, arr, 1 - arr)
+
 def tmp0():
     slide1(Sphere().im)
 
@@ -259,4 +267,4 @@ def tmp3():
     print(sy.simplify((da2 / db2 - 1) / da ** 2))
 
 if __name__ == "__main__":
-    tmp0()
+    slide1(Concave().im, valmin=-2)
