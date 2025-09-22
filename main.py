@@ -129,7 +129,8 @@ def adjust(arr):
     d0, d1 = grad(arr)
     sq = hessian(d0, d1)
     para, perp = eigenvalues2x2(sq)
-    coef = np.divide(para, perp ** 3, out=np.ones_like(arr), where=perp != 0)
+    cos2 = np.divide(para, perp, out=np.ones_like(arr), where=perp != 0)
+    coef = (cos2 - 1) / (d0 ** 2 + d1 ** 2)
     return d0 * coef, d1 * coef
 
 def slide1(arr):
@@ -191,12 +192,13 @@ class Sphere:
         radius = sy.sqrt(tr ** 2 / 4 - expr.det())
         return sy.Matrix([[center - radius], [center + radius]])
 
-    def coef(self):
+    def cos2(self):
         para, perp = self.eigenvalues()
-        return para / perp ** 3
+        return para / perp
 
     def adjusted(self):
-        return self.coef() * self.grad()
+        d0, d1 = d = self.grad()
+        return (self.cos2() - 1) / (d0 ** 2 + d1 ** 2) * d
 
     def at(self, *args):
         return list(zip(self.dim, args))
@@ -257,4 +259,4 @@ def tmp3():
     print(sy.simplify((da2 / db2 - 1) / da ** 2))
 
 if __name__ == "__main__":
-    tmp3()
+    tmp0()
