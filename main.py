@@ -209,7 +209,8 @@ class Sphere:
         return adjust(self.im)
 
     def cmp(self, a, b):
-        return [i[a, b] for i in self.approx], self.subs(a, b).evalf().tolist()
+        return [i[a, b] for i in self.approx], \
+                self.subs(a, b).T.evalf().tolist()[0]
 
 def tmp0():
     slide1(Sphere().im)
@@ -243,5 +244,17 @@ def tmp2(delta0=-10, delta1=-10):
             print(mock.im[ex[0] + i, ex[1] + j], end=" ")
     print()
 
+def tmp3():
+    a, b, c, p, w = sy.symbols('a b c p w')
+    expr = c + sy.sqrt(p ** 2 - a ** 2 - b ** 2) / w
+
+    change = [(b, 0)]
+    f = expr.subs(change)
+    da = sy.simplify(sy.diff(expr, a).subs(change))
+    da2 = sy.simplify(sy.diff(expr, a, a).subs(change))
+    db2 = sy.simplify(sy.diff(expr, b, b).subs(change))
+
+    print(sy.simplify((da2 / db2 - 1) / da ** 2))
+
 if __name__ == "__main__":
-    tmp0()
+    tmp3()
