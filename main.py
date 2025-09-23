@@ -129,6 +129,8 @@ def adjust(arr):
     d0, d1 = grad(arr)
     sq = hessian(d0, d1)
     para, perp = eigenvalues2x2(sq)
+    # perp < 0 <-> negative definite <-> convex out-of-the-page/screen
+    # the (first) eigenvectors should form a good basis for the gradient
     sec2 = np.divide(para, perp, out=np.ones_like(arr), where=perp != 0)
     # sec ** 2 - 1 = tan ** 2
     coef = (sec2 - 1) / (d0 ** 2 + d1 ** 2)
@@ -266,6 +268,9 @@ def tmp3():
     db2 = sy.simplify(sy.diff(expr, b, b).subs(change))
 
     print(sy.simplify((da2 / db2 - 1) / da ** 2))
+    # da / db2 = a
+    # so the rays could be reduced to a point approximation
+    # but the numerical stability is still unclear to me
 
 if __name__ == "__main__":
     slide1(Concave().im, valmin=-2)
