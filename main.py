@@ -8,6 +8,7 @@ import sympy as sy
 local = pathlib.Path(__file__).parents[0]
 mlmodel = None
 target = np.array([392, 518])
+coord = np.stack(np.meshgrid(*map(np.arange, target[::-1]))[::-1], -1)
 diag = np.sqrt(np.sum(target ** 2))
 
 def mlpackage():
@@ -42,66 +43,41 @@ im4 = fs(local / "IMG_0004.HEIC", local / "out4.npy")
 im5 = fs(local / "IMG_0005.HEIC", local / "out5.npy")
 
 def grad(arr):
-    return sobel(arr, 0) / 8, sobel(arr, 1) / 8
+    return np.stack((sobel(arr, 0), sobel(arr, 1)), -1) / 8
 
-def hessian(d0, d1):
-    return list(map(grad, [d0, d1]))
+def hessian(partials):
+    return np.stack((grad(partials[..., 0]), grad(partials[..., 1])), -1)
 
-# https://people.math.harvard.edu/~knill/teaching/math21b2004/exhibits/2dmatrices/index.html
-# L = T / 2 \pm (T ** 2 / 4 - D) ** 1/2
-# λ[0] = ∂∥∂∥ <= ∂⟂∂⟂ = λ[1]
-def eigenvalues2x2(sq):
-    tr = sq[0][0] + sq[1][1]
-    det = sq[0][0] * sq[1][1] - sq[0][1] * sq[1][0]
-    center = tr / 2
-    radius = np.sqrt(tr ** 2 / 4 - det)
-    return [center - radius, center + radius]
+def normals(partials, t):
+    parametric = (coord + partials * t * diag).reshape([-1, 2])
+    return interpolate(parametric)
 
-def normals(d0, d1, t):
-    t *= diag
-    c1, c0 = np.meshgrid(*map(np.arange, target[::-1]))
-    e0, e1 = (c0 + d0 * t).flatten(), (c1 + d1 * t).flatten()
-    return interpolate(e0, e1)
-
-def interpolate(e0, e1):
+def interpolate(continuous):
     out = np.zeros(target)
-    f0, f1 = np.int32(np.floor(e0)), np.int32(np.floor(e1))
-    g0, g1 = e0 - f0, e1 - f1
-    for i0, i1 in [[0, 0], [0, 1], [1, 0], [1, 1]]:
-        z0, z1 = f0 + i0, f1 + i1
-        y0, y1 = (1 - i0) + (2 * i0 - 1) * g0, (1 - i1) + (2 * i1 - 1) * g1
-        x0 = np.logical_and(z0 >= 0, z0 < target[0])
-        x1 = np.logical_and(z1 >= 0, z1 < target[1])
-        w = np.logical_and(x0, x1)
-        out[z0[w], z1[w]] += y0[w] * y1[w]
+    floored = np.int32(continuous)
+    remainder = continuous - floored
+    for offset in np.array([[[0, 0]], [[0, 1]], [[1, 0]], [[1, 1]]]):
+        filling = floored + offset
+        overlap = 1 - offset + (2 * offset - 1) * remainder
+        oob0 = np.logical_and(filling[..., 0] >= 0, filling[..., 0] < target[0])
+        oob1 = np.logical_and(filling[..., 1] >= 0, filling[..., 1] < target[1])
+        valid = np.logical_and(oob0, oob1)
+        out[filling[valid][..., 0], filling[valid][..., 1]] += \
+                overlap[valid][..., 0] * overlap[valid][..., 1]
     return out
 
-def casts(im, s0, s1, w):
-    c1, c0 = np.meshgrid(*map(np.arange, target[::-1]))
-    delta = im - w
-    e0, e1 = c0 + delta * s0, c1 + delta * s1
-    return interpolate(e0[delta > 0].flatten(), e1[delta > 0].flatten())
-
-def sources(d0, d1, t, s1, s0):
-    t *= diag
-    c1, c0 = np.meshgrid(*map(np.arange, target[::-1]))
-    e0, e1 = c0 + d0 * t, c1 + d1 * t
-    return np.log(np.sqrt((e0 - s0) ** 2 + (e1 - s1) ** 2))
+def casts(im, slopes, depth):
+    delta = im - depth
+    intersection = coord + delta[..., None] * slopes
+    return interpolate(intersection[delta > 0].reshape([-1, 2]))
 
 def slide(f, **kw):
-    frame = f(0)
+    frame = f(kw["valinit"] if "valinit" in kw else 0)
 
     from matplotlib.widgets import Slider, Button
     fig, ax = plt.subplots()
     out = ax.imshow(frame, vmin=0, vmax=4)
     fig.subplots_adjust(bottom=0.25)
-
-    def onclick(event):
-        if event.inaxes != ax:
-            return
-        out.set_data(sources(d0, d1, slider.val, event.xdata, event.ydata))
-        fig.canvas.draw_idle()
-    # fig.canvas.mpl_connect('button_press_event', onclick)
 
     axt = fig.add_axes([0.1, 0.1, 0.8, 0.03])
     slider = Slider(ax=axt, label='t', **kw)
@@ -112,50 +88,28 @@ def slide(f, **kw):
         fig.canvas.draw_idle()
     slider.on_changed(update)
 
-    bax = fig.add_axes([0.8, 0.025, 0.1, 0.04])
-    button = Button(bax, 'reset', hovercolor='0.975')
-    def bev(event):
-        out.set_data(frame)
-        fig.canvas.draw_idle()
-    button.on_clicked(bev)
-
     plt.show()
 
 def slide0(arr):
-    d0, d1 = grad(arr)
-    return slide(partial(normals, d0, d1), valmin=0, valmax=8, valinit=0)
+    return slide(partial(normals, grad(arr)), valmin=0, valmax=8, valinit=0)
 
 def adjust(arr):
-    d0, d1 = grad(arr)
-    sq = hessian(d0, d1)
-    para, perp = eigenvalues2x2(sq)
+    partials = grad(arr)
+    second = hessian(partials)
+    eigval, eigvec = np.linalg.eigh(second)
+    # λ[0] = ∂∥∂∥ <= ∂⟂∂⟂ = λ[1]
+    para, perp = np.min(eigval, -1), np.max(eigval, -1)
     # perp < 0 <-> negative definite <-> convex out-of-the-page/screen
     # the (first) eigenvectors should form a good basis for the gradient
     sec2 = np.divide(para, perp, out=np.ones_like(arr), where=perp != 0)
     # sec ** 2 - 1 = tan ** 2
-    coef = (sec2 - 1) / (d0 ** 2 + d1 ** 2)
-    return d0 * coef, d1 * coef
+    coef = (sec2 - 1) / np.sum(partials ** 2, -1)
+    return partials * coef[..., None]
 
 def slide1(arr, **kw):
-    s0, s1 = adjust(arr)
+    slopes = adjust(arr)
     defaults = { "valmin": 0, "valmax": 1, "valinit": 0.1 }
-    defaults = {i: j for i, j in defaults.items() if i not in kw}
-    return slide(partial(casts, arr, s0, s1), **kw, **defaults)
-
-def density(arr, samples=100, scale=4):
-    d0, d1 = grad(arr)
-    t = np.linspace(0, scale, samples)
-    out = np.zeros((samples,) + arr.shape)
-    for i in range(samples):
-        out[i] = normals(d0, d1, t[i])
-    return out
-
-def blur(arr, sigma=3):
-    from scipy.ndimage import gaussian_filter
-    return gaussian_filter(arr, sigma=sigma)
-
-def ndmax(arr):
-    return np.unravel_index(arr.argmax(), arr.shape)
+    return slide(partial(casts, arr, slopes), **{**defaults, **kw})
 
 class Sphere:
     t0, t1 = target // 2
@@ -273,4 +227,4 @@ def tmp3():
     # but the numerical stability is still unclear to me
 
 if __name__ == "__main__":
-    slide1(Concave().im, valmin=-2)
+    slide1(im5)
