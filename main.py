@@ -226,5 +226,18 @@ def tmp3():
     # so the rays could be reduced to a point approximation
     # but the numerical stability is still unclear to me
 
+def tmp4(arr):
+    partials = grad(arr)
+    second = hessian(partials)
+    eigval, eigvec = np.linalg.eigh(second)
+    t0 = np.atan2(eigvec[..., 0, 0], eigvec[..., 0, 1])
+    t1 = np.atan2(eigvec[..., 1, 0], eigvec[..., 1, 1])
+    t2 = np.atan2(partials[..., 0], partials[..., 1])
+    plt.imshow(t2)
+    plt.show()
+    plt.imshow(np.where(eigval[..., 0] > eigval[..., 1], t0, t1))
+    plt.show()
+    # eigenvectors look unstable; probably switch basis to gradient & orthogonal
+
 if __name__ == "__main__":
-    slide1(im5)
+    tmp4(im5)
