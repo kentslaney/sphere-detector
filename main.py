@@ -239,5 +239,23 @@ def tmp4(arr):
     plt.show()
     # eigenvectors look unstable; probably switch basis to gradient & orthogonal
 
+def tmp5():
+    arr = Sphere().im
+    partials = grad(arr)
+    second = hessian(partials)
+    eigval, eigvec = np.linalg.eigh(second)
+    norm = np.sqrt(np.sum(partials ** 2, -1, keepdims=True))
+    basis0 = np.divide(
+            partials, norm, out=np.zeros_like(partials), where=norm != 0)
+    basis1 = basis0[..., ::-1] * np.array([[[-1, 1]]])
+    basis = np.stack((basis0, basis1), -1)
+    inv = basis * np.array([[[[1, -1], [-1, 1]]]])
+    out = inv @ second @ basis
+    crop = (
+            slice(target[0] * 2 // 5, target[0] * 2 // 5 + 3),
+            slice(target[1] * 2 // 5, target[1] * 2 // 5 + 3))
+    print(out[*crop])
+    print(eigval[*crop])
+
 if __name__ == "__main__":
     tmp4(im5)
