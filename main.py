@@ -90,8 +90,9 @@ def slide(f, **kw):
 
     plt.show()
 
-def slide0(arr):
-    return slide(partial(normals, grad(arr)), valmin=0, valmax=8, valinit=0)
+def slide0(arr, slopes=None):
+    slopes = grad(arr) if slopes is None else slopes
+    return slide(partial(normals, slopes), valmin=0, valmax=8, valinit=0)
 
 def adjust(arr):
     partials = grad(arr)
@@ -106,8 +107,8 @@ def adjust(arr):
     coef = (sec2 - 1) / np.sum(partials ** 2, -1)
     return partials * coef[..., None]
 
-def slide1(arr, **kw):
-    slopes = adjust(arr)
+def slide1(arr, slopes=None, **kw):
+    slopes = adjust(arr) if slopes is None else slopes
     defaults = { "valmin": 0, "valmax": 1, "valinit": 0.1 }
     return slide(partial(casts, arr, slopes), **{**defaults, **kw})
 
@@ -239,18 +240,21 @@ def tmp4(arr):
     plt.show()
     # eigenvectors look unstable; probably switch basis to gradient & orthogonal
 
-def tmp5():
-    arr = Sphere().im
-    partials = grad(arr)
-    second = hessian(partials)
-    eigval, eigvec = np.linalg.eigh(second)
+def rotated(partials, second):
     norm = np.sqrt(np.sum(partials ** 2, -1, keepdims=True))
     basis0 = np.divide(
             partials, norm, out=np.zeros_like(partials), where=norm != 0)
     basis1 = basis0[..., ::-1] * np.array([[[-1, 1]]])
     basis = np.stack((basis0, basis1), -1)
     inv = basis * np.array([[[[1, -1], [-1, 1]]]])
-    out = inv @ second @ basis
+    return inv @ second @ basis
+
+def tmp5():
+    arr = Sphere().im
+    partials = grad(arr)
+    second = hessian(partials)
+    eigval, eigvec = np.linalg.eigh(second)
+    out = rotated(partials, second)
     crop = (
             slice(target[0] * 2 // 5, target[0] * 2 // 5 + 3),
             slice(target[1] * 2 // 5, target[1] * 2 // 5 + 3))
@@ -259,5 +263,17 @@ def tmp5():
     # out is symmetric b/c symmetry of second derivatives
     # the (single unique) off-diagonal term may work as an error metric
 
+def tmp6(arr=im5):
+    partials = grad(arr)
+    second = hessian(partials)
+    out = rotated(partials, second)
+    concave_down = np.logical_and(np.linalg.det(out) > 0, out[..., 0, 0] < 0)
+    sec2 = np.divide(
+            out[..., 0, 0], out[..., 1, 1],
+            out=2 * np.ones_like(arr), where=concave_down)
+    coef = (sec2 - 1) / np.sum(partials ** 2, -1)
+    slopes = partials * coef[..., None]
+    slide1(arr, slopes)
+
 if __name__ == "__main__":
-    tmp4(im5)
+    tmp6()
