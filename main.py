@@ -256,6 +256,8 @@ def tmp5():
             slice(target[1] * 2 // 5, target[1] * 2 // 5 + 3))
     print(out[*crop])
     print(eigval[*crop])
+    # out is symmetric b/c symmetry of second derivatives
+    # the (single unique) off-diagonal term may work as an error metric
 
 if __name__ == "__main__":
     tmp4(im5)
