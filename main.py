@@ -64,6 +64,7 @@ def interpolate(continuous):
         valid = np.logical_and(oob0, oob1)
         out[filling[valid][..., 0], filling[valid][..., 1]] += \
                 overlap[valid][..., 0] * overlap[valid][..., 1]
+    print(np.sum(out))
     return out
 
 def casts(im, slopes, depth):
@@ -271,9 +272,10 @@ def tmp6(arr=im5):
     sec2 = np.divide(
             out[..., 0, 0], out[..., 1, 1],
             out=2 * np.ones_like(arr), where=concave_down)
-    coef = (sec2 - 1) / np.sum(partials ** 2, -1)
+    norm = np.sum(partials ** 2, -1)
+    coef = np.divide(sec2 - 1, norm, out=np.ones_like(norm), where=norm != 0)
     slopes = partials * coef[..., None]
     slide1(arr, slopes)
 
 if __name__ == "__main__":
-    tmp6()
+    tmp6(Sphere().im)
