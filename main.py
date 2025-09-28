@@ -54,7 +54,7 @@ def normals(partials, t):
 
 def interpolate(continuous):
     out = np.zeros(target)
-    floored = np.int32(continuous)
+    floored = np.int32(np.floor(continuous))
     remainder = continuous - floored
     for offset in np.array([[[0, 0]], [[0, 1]], [[1, 0]], [[1, 1]]]):
         filling = floored + offset
@@ -62,9 +62,10 @@ def interpolate(continuous):
         oob0 = np.logical_and(filling[..., 0] >= 0, filling[..., 0] < target[0])
         oob1 = np.logical_and(filling[..., 1] >= 0, filling[..., 1] < target[1])
         valid = np.logical_and(oob0, oob1)
-        out[filling[valid][..., 0], filling[valid][..., 1]] += \
-                overlap[valid][..., 0] * overlap[valid][..., 1]
-    print(np.sum(out))
+        np.add.at(
+                out,
+                (filling[valid][..., 0], filling[valid][..., 1]),
+                overlap[valid][..., 0] * overlap[valid][..., 1])
     return out
 
 def casts(im, slopes, depth):
