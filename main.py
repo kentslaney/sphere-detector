@@ -11,6 +11,9 @@ target = np.array([392, 518])
 coord = np.stack(np.meshgrid(*map(np.arange, target[::-1]))[::-1], -1)
 diag = np.sqrt(np.sum(target ** 2))
 
+f_px = 18 / 35 * np.linalg.norm(target)
+csc = np.sqrt(1 + np.sum(((coord - target[None] / 2) / f_px) ** 2, axis=-1))
+
 def mlpackage():
     global Image
     from PIL import Image
