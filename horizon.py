@@ -56,7 +56,7 @@ def grad(arr):
 def hessian(partials):
     return np.stack((grad(partials[..., 0]), grad(partials[..., 1])), -1)
 
-def interpolate(continuous: flat2d):
+def interpolate(continuous: flat2d, *a, **kw):
     out = np.zeros(target)
     floored = np.int32(np.floor(continuous))
     remainder = continuous - floored
@@ -70,10 +70,40 @@ def interpolate(continuous: flat2d):
                 overlap[valid][..., 0] * overlap[valid][..., 1])
     return out
 
+def supports(continuous: flat2d, partials, topk=8):
+    out = np.zeros(target)
+    sources = np.zeros(target.tolist() + [topk, 3])
+    floored = np.int32(np.floor(continuous))
+    remainder = continuous - floored
+    normed = np.divide(
+            partials, np.linalg.norm(partials, axis=1, keepdims=True),
+            where=~np.all(partials == 0, axis=1, keepdims=True),
+            out=np.zeros_like(partials))
+    for offset in np.array([[[0, 0]], [[0, 1]], [[1, 0]], [[1, 1]]]):
+        filling = floored + offset
+        overlap = 1 - offset + (2 * offset - 1) * remainder
+        valid = np.all(
+                np.logical_and(filling >= 0, filling < target[None]), axis=1)
+        values = overlap[..., 0] * overlap[..., 1]
+        filling, values = filling[valid], values[valid]
+        rays = normed[valid] * values[:, None]
+        for i in np.arange(rays.shape[0]):
+            y, x = filling[i]
+            value, vec = values[i], rays[i]
+            ref = sources[y, x]
+            if np.sum(ref > value) < topk:
+                replacing = np.argmin(ref[:, 0])
+                ref[replacing, 0] = value
+                ref[replacing, 1:] = vec
+    for i, j in coord.reshape(-1, 2):
+        out[i, j] = horizon_metric(sources[i, j, :, 1:].T)
+    return out
+
 def casts(im, slopes, depth):
     delta = im - depth
     intersection = coord + delta[..., None] * slopes
-    return interpolate(intersection[delta > 0].reshape([-1, 2]))
+    return supports(
+            intersection[delta > 0].reshape([-1, 2]), slopes[delta > 0])
 
 def slide(f, **kw):
     frame = f(kw["valinit"] if "valinit" in kw else 0)
@@ -95,7 +125,7 @@ def slide(f, **kw):
     plt.show()
 
 def slide_partials(arr, slopes, **kw):
-    defaults = { "valmin": 0, "valmax": 1, "valinit": 0.1 }
+    defaults = { "valmin": 0, "valmax": 1, "valinit": 0.155 }
     return slide(partial(casts, arr, slopes), **{**defaults, **kw})
 
 def rotated(partials, second):
@@ -144,5 +174,5 @@ def horizon_metric(rays: flat2d):
 def fov_fix(arr):
     return 1 - fov_csc * (1 - arr)
 
-if __name__ == "__main__":
-    depth_slices(im8)
+# if __name__ == "__main__":
+depth_slices(im4)
