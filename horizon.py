@@ -174,13 +174,8 @@ def horizon_metric(rays: flat2d):
             np.linalg.norm(rays, axis=0, keepdims=True)
     # consider each of the "support rays" along an extra dimension
     expanded = np.vstack((transformed, np.eye(rays.shape[1])))
-    # svd.U is an orthonormal basis for the column space of expanded
-    svd = np.linalg.svd(expanded, full_matrices=False)
-    # sub is the unstretched embedding of expanded into one dimension per point
-    sub = svd.U.T @ expanded
-    # and the absoulte value of the determinant gives the volume formed by the
-    #     new vectors, plus an extra for the unit cube added by the identity
-    return np.abs(np.linalg.det(sub)) - 1
+    # https://stackoverflow.com/a/74656268/3476782
+    return np.sqrt(np.abs(np.linalg.det(expanded.T.dot(expanded)))) - 1
 
 # TODO
 horizon_vectorized = np.vectorize(horizon_metric, signature='(m, n)->()')
