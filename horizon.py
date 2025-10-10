@@ -56,7 +56,7 @@ def grad(arr):
 def hessian(partials):
     return np.stack((grad(partials[..., 0]), grad(partials[..., 1])), -1)
 
-def interpolate(continuous: flat2d, *a, **kw):
+def interpolate(continuous, *a, **kw):
     out = np.zeros(target)
     floored = np.int32(np.floor(continuous))
     remainder = continuous - floored
@@ -70,9 +70,10 @@ def interpolate(continuous: flat2d, *a, **kw):
                 overlap[valid][..., 0] * overlap[valid][..., 1])
     return out
 
-def supports(continuous: flat2d, partials, topk=8):
-    out = np.zeros(target)
-    sources = np.zeros(target.tolist() + [topk, 3])
+def supports(continuous, partials, topk=8):
+    sources = np.vstack((
+        np.zeros([3, 4, continuous.shape[0]]),
+        -np.ones([1, 4, continuous.shape[0]])))
     floored = np.int32(np.floor(continuous))
     remainder = continuous - floored
     normed = np.divide(
@@ -84,20 +85,30 @@ def supports(continuous: flat2d, partials, topk=8):
         overlap = 1 - offset + (2 * offset - 1) * remainder
         valid = np.all(
                 np.logical_and(filling >= 0, filling < target[None]), axis=1)
+        overlap, filling = overlap[valid], filling[valid]
+        filling_flat = filling[..., 0] * target[1] + filling[..., 1]
         values = overlap[..., 0] * overlap[..., 1]
-        filling, values = filling[valid], values[valid]
         rays = normed[valid] * values[:, None]
-        for i in np.arange(rays.shape[0]):
-            y, x = filling[i]
-            value, vec = values[i], rays[i]
-            ref = sources[y, x]
-            if np.sum(ref > value) < topk:
-                replacing = np.argmin(ref[:, 0])
-                ref[replacing, 0] = value
-                ref[replacing, 1:] = vec
-    for i, j in coord.reshape(-1, 2):
-        out[i, j] = horizon_metric(sources[i, j, :, 1:].T)
-    return out
+        # lexsort is last-key-first but unique requires first-key-first
+        # so the flattened index has to be used instead of multiple fields
+        filling_flat = filling[..., 0] * target[1] + filling[..., 1]
+        sources[:, offset[0, 0] * 2 + offset[0, 1], :filling_flat.shape[0]] = \
+                np.vstack((rays[:, ::-1].T, -values[None], filling_flat[None]))
+    sources = sources.reshape(4, -1)
+    # ensure consistent behavior even when all valid
+    sources = np.hstack((np.array([0, 0, 0, -1])[:, None], sources))
+    sources = sources[:, np.lexsort(sources)]
+    coord_flat, offset, counts = np.unique(
+            sources[-1], return_index=True, return_counts=True, sorted=True)
+    keeping = np.arange(topk)[None] < counts[:, None]
+    ref = (offset[:, None] + np.arange(topk)[None]) * keeping
+    deref = sources[:2, np.ravel(ref)].reshape(2, -1, topk)
+    deref = np.transpose(deref, axes=(1, 0, 2))
+    deref, coord_flat = deref[1:], np.int32(coord_flat[1:])
+    # set coord_flat to deref
+    out = np.zeros(target.tolist() + [2, topk])
+    out[coord_flat // target[1], coord_flat % target[1]] = deref
+    return horizon_vectorized(out)
 
 def casts(im, slopes, depth):
     delta = im - depth
@@ -171,8 +182,11 @@ def horizon_metric(rays: flat2d):
     #     new vectors, plus an extra for the unit cube added by the identity
     return np.abs(np.linalg.det(sub)) - 1
 
+# TODO
+horizon_vectorized = np.vectorize(horizon_metric, signature='(m, n)->()')
+
 def fov_fix(arr):
     return 1 - fov_csc * (1 - arr)
 
-# if __name__ == "__main__":
-depth_slices(im4)
+if __name__ == "__main__":
+    depth_slices(im4)
