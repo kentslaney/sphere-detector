@@ -108,7 +108,7 @@ def supports(continuous, partials, topk=8):
     # set coord_flat to deref
     out = np.zeros(target.tolist() + [2, topk])
     out[coord_flat // target[1], coord_flat % target[1]] = deref
-    return horizon_vectorized(out)
+    return horizon_metric(out)
 
 def casts(im, slopes, depth):
     delta = im - depth
@@ -166,19 +166,20 @@ def cis_h(half_turns):
     return np.stack((np.cos(half_turns), np.sin(half_turns)))
 
 # non-parametric (unknown shape) but zero-pad agnostic
-def horizon_metric(rays: flat2d):
-    assert rays.shape[0] == 2
+def horizon_metric(rays):
+    assert rays.shape[-2] == 2
     # make anti-parallel an independent axis
-    halved = np.atan2(*rays[::-1]) / 2
-    transformed = np.stack((np.cos(halved), np.sin(halved))) * \
-            np.linalg.norm(rays, axis=0, keepdims=True)
+    halved = np.atan2(rays[..., 0, :], rays[..., 1, :]) / 2
+    transformed = np.stack((np.cos(halved), np.sin(halved)), -2) * \
+            np.linalg.norm(rays, axis=-2, keepdims=True)
     # consider each of the "support rays" along an extra dimension
-    expanded = np.vstack((transformed, np.eye(rays.shape[1])))
+    spread = np.broadcast_to(
+            np.eye(rays.shape[-1])[(None,) * (rays.ndim - 2)],
+            rays.shape[:-2] + (rays.shape[-1],) * 2)
+    expanded = np.concatenate((transformed, spread), -2)
     # https://stackoverflow.com/a/74656268/3476782
-    return np.sqrt(np.abs(np.linalg.det(expanded.T.dot(expanded)))) - 1
-
-# TODO
-horizon_vectorized = np.vectorize(horizon_metric, signature='(m, n)->()')
+    expanded_T = np.moveaxis(expanded, -2, -1)
+    return np.sqrt(np.abs(np.linalg.det(expanded_T @ expanded))) - 1
 
 def fov_fix(arr):
     return 1 - fov_csc * (1 - arr)
