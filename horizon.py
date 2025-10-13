@@ -180,7 +180,6 @@ def horizon_metric(rays):
             np.eye(rays.shape[-1])[(None,) * (rays.ndim - 2)],
             rays.shape[:-2] + (rays.shape[-1],) * 2)
     expanded = np.concatenate((transformed, spread), -2)
-    # https://stackoverflow.com/a/74656268/3476782
     expanded_T = np.moveaxis(expanded, -2, -1)
     return np.sqrt(np.abs(np.linalg.det(expanded_T @ expanded))) - 1
 
