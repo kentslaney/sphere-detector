@@ -148,7 +148,7 @@ def rotated(partials, second):
     inv = basis * np.array([[[[1, -1], [-1, 1]]]])
     return inv @ second @ basis
 
-def depth_slices(arr=im5):
+def relative_slopes(arr):
     partials = grad(arr)
     second = hessian(partials)
     out = rotated(partials, second)
@@ -159,6 +159,9 @@ def depth_slices(arr=im5):
     norm = np.sum(partials ** 2, -1)
     coef = np.divide(sec2 - 1, norm, out=np.ones_like(norm), where=norm != 0)
     slopes = partials * coef[..., None]
+    return slopes
+
+def depth_slices(arr=im5):
     slide_partials(arr, slopes)
 
 def cis_h(half_turns):
@@ -184,5 +187,28 @@ def horizon_metric(rays):
 def fov_fix(arr):
     return 1 - fov_csc * (1 - arr)
 
+def density(arr, samples=100, cache=None):
+    if cache is not None:
+        cache = pathlib.Path(cache)
+        if cache.exists():
+            return np.load(cache)
+    slopes = relative_slopes(arr)
+    t = np.linspace(0, 1, samples)
+    out = np.zeros((samples,) + arr.shape)
+    for i in range(samples):
+        out[i] = casts(arr, slopes, t[i])
+    if cache is not None:
+        np.save(cache, out)
+    return out
+
+def slide_voxels(arr, **kw):
+    defaults = { "valmin": 0, "valmax": 1, "valinit": 0.155 }
+    def update(val):
+        return arr[np.int32(np.round(val * arr.shape[0]))]
+    return slide(update, **{**defaults, **kw})
+
+def ndmax(arr):
+    return np.unravel_index(arr.argmax(), arr.shape)
+
 if __name__ == "__main__":
-    depth_slices(im4)
+    slide_voxels(density(im4, cache="voxels4.npy"))
