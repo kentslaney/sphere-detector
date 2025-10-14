@@ -51,6 +51,7 @@ im7 = fs(local / "IMG_0007.HEIC", local / "out7.npy")
 im8 = fs(local / "IMG_0008.HEIC", local / "out8.npy")
 
 scharr = np.array([[-3, -10, -3], [0, 0, 0], [3, 10, 3]])
+scharr = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]])
 
 def grad(arr):
     return np.stack((
@@ -122,9 +123,10 @@ def support_casts(im, slopes, depth):
             intersection[delta > 0].reshape([-1, 2]), slopes[delta > 0])
 
 def casts(im, slopes, depth):
+    # return horizon_metric(support_casts(im, slopes, depth))
     delta = im - depth
     intersection = coord + delta[..., None] * slopes
-    return horizon_metric(support_casts(im, slopes, depth))
+    return interpolate(intersection[delta > 0].reshape([-1, 2]))
 
 def slide(f, **kw):
     frame = f(kw["valinit"] if "valinit" in kw else 0)
@@ -208,13 +210,13 @@ def horizon_metric(rays, stretch=1):
 def fov_fix(arr):
     return 1 - fov_csc * (1 - arr)
 
-def density(arr, samples=100, cache=None):
+def density(arr, samples=100, cache=None, lo=0, hi=1):
     if cache is not None:
         cache = pathlib.Path(cache)
         if cache.exists():
             return np.load(cache)
     slopes = relative_slopes(arr)
-    t = np.linspace(0, 1, samples)
+    t = np.linspace(lo, hi, samples)
     out = np.zeros((samples,) + arr.shape)
     for i in range(samples):
         out[i] = casts(arr, slopes, t[i])
@@ -224,8 +226,9 @@ def density(arr, samples=100, cache=None):
 
 def slide_voxels(arr, **kw):
     defaults = { "valmin": 0, "valmax": 1, "valinit": 0.155 }
+    samples = arr.shape[0]
     def update(val):
-        return arr[np.int32(np.round(val * arr.shape[0]))]
+        return arr[np.minimum(samples - 1, np.int32(np.round(val * samples)))]
     return slide(update, **{**defaults, **kw})
 
 def ndmax(arr):
@@ -254,4 +257,6 @@ def sample(arr=im4, depth=0.155):
     plt.show()
 
 if __name__ == "__main__":
-    sample()
+    # slide_voxels(density(im4, cache="voxels4.npy", lo=0.1, hi=0.2))
+    # slide_voxels(density(im5, cache="voxels5.npy", lo=0, hi=1))
+    depth_slices()

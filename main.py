@@ -282,4 +282,5 @@ def tmp6(arr=im5):
     slide1(arr, slopes)
 
 if __name__ == "__main__":
-    tmp6(Sphere().im)
+    # tmp6(Sphere().im)
+    tmp6()
