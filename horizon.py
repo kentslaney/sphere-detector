@@ -1,7 +1,7 @@
 import pathlib
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import sobel
+from scipy.signal import convolve2d
 from functools import partial, cached_property
 import sympy as sy
 from typing import Literal
@@ -50,8 +50,13 @@ im5 = fs(local / "IMG_0005.HEIC", local / "out5.npy")
 im7 = fs(local / "IMG_0007.HEIC", local / "out7.npy")
 im8 = fs(local / "IMG_0008.HEIC", local / "out8.npy")
 
+scharr = np.array([[-3, -10, -3], [0, 0, 0], [3, 10, 3]])
+
 def grad(arr):
-    return np.stack((sobel(arr, 0), sobel(arr, 1)), -1) / 8
+    return np.stack((
+        convolve2d(arr, scharr, boundary='symm', mode='same'),
+        convolve2d(arr, scharr.T, boundary='symm', mode='same')), -1) / np.sum(
+                np.abs(scharr))
 
 def hessian(partials):
     return np.stack((grad(partials[..., 0]), grad(partials[..., 1])), -1)
@@ -162,7 +167,7 @@ def relative_slopes(arr):
     return slopes
 
 def depth_slices(arr=im5):
-    slide_partials(arr, slopes)
+    slide_partials(arr, relative_slopes(arr))
 
 def cis_h(half_turns):
     half_turns = np.array(half_turns) * np.pi
@@ -210,4 +215,4 @@ def ndmax(arr):
     return np.unravel_index(arr.argmax(), arr.shape)
 
 if __name__ == "__main__":
-    slide_voxels(density(im4, cache="voxels4.npy"))
+    slide_voxels(density(im4))
