@@ -122,7 +122,7 @@ def support_casts(im, slopes, depth):
             intersection[delta > 0].reshape([-1, 2]), slopes[delta > 0])
 
 def casts(im, slopes, depth):
-    # return horizon_metric(support_casts(im, slopes, depth))
+    return horizon_metric(support_casts(im, slopes, depth))
     delta = im - depth
     intersection = coord + delta[..., None] * slopes
     return interpolate(intersection[delta > 0].reshape([-1, 2]))
@@ -256,6 +256,7 @@ def sample(arr=im4, depth=0.155):
     plt.show()
 
 if __name__ == "__main__":
+    sample()
     # slide_voxels(density(im4, cache="voxels4.npy", lo=0.1, hi=0.2))
     # slide_voxels(density(im5, cache="voxels5.npy", lo=0, hi=1))
-    depth_slices()
+    # depth_slices()
