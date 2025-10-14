@@ -75,7 +75,7 @@ def interpolate(continuous, *a, **kw):
                 overlap[valid][..., 0] * overlap[valid][..., 1])
     return out
 
-def supports(continuous, partials, topk=8):
+def raster_supports(continuous, partials, topk=8):
     sources = np.vstack((
         np.zeros([3, 4, continuous.shape[0]]),
         -np.ones([1, 4, continuous.shape[0]])))
@@ -113,18 +113,23 @@ def supports(continuous, partials, topk=8):
     # set coord_flat to deref
     out = np.zeros(target.tolist() + [2, topk])
     out[coord_flat // target[1], coord_flat % target[1]] = deref
-    return horizon_metric(out)
+    return out
+
+def support_casts(im, slopes, depth):
+    delta = im - depth
+    intersection = coord + delta[..., None] * slopes
+    return raster_supports(
+            intersection[delta > 0].reshape([-1, 2]), slopes[delta > 0])
 
 def casts(im, slopes, depth):
     delta = im - depth
     intersection = coord + delta[..., None] * slopes
-    return supports(
-            intersection[delta > 0].reshape([-1, 2]), slopes[delta > 0])
+    return horizon_metric(support_casts(im, slopes, depth))
 
 def slide(f, **kw):
     frame = f(kw["valinit"] if "valinit" in kw else 0)
 
-    from matplotlib.widgets import Slider, Button
+    from matplotlib.widgets import Slider
     fig, ax = plt.subplots()
     out = ax.imshow(frame, vmin=0, vmax=4)
     fig.subplots_adjust(bottom=0.25)
@@ -166,26 +171,38 @@ def relative_slopes(arr):
     slopes = partials * coef[..., None]
     return slopes
 
-def depth_slices(arr=im5):
-    slide_partials(arr, relative_slopes(arr))
+def depth_slices(arr=im5, **kw):
+    slide_partials(arr, relative_slopes(arr), **kw)
 
 def cis_h(half_turns):
     half_turns = np.array(half_turns) * np.pi
     return np.stack((np.cos(half_turns), np.sin(half_turns)))
 
+def diagonal_stretch(ndim, k):
+    stretch = np.eye(ndim) * k ** (-1 / (ndim - 1))
+    stretch[0, 0] = k
+    initial_basis = np.eye(ndim)
+    initial_basis[:, 0] = np.ones(ndim)
+    # Q is orthonormal with a matching direction for the first vector
+    rotation, _ = np.linalg.qr(initial_basis)
+    symmetric_matrix = rotation @ stretch @ rotation.T
+    return symmetric_matrix
+
 # non-parametric (unknown shape) but zero-pad agnostic
-def horizon_metric(rays):
+def horizon_metric(rays, stretch=1):
     assert rays.shape[-2] == 2
+    n = rays.shape[-1]
     # make anti-parallel an independent axis
     halved = np.atan2(rays[..., 0, :], rays[..., 1, :]) / 2
     transformed = np.stack((np.cos(halved), np.sin(halved)), -2) * \
             np.linalg.norm(rays, axis=-2, keepdims=True)
     # consider each of the "support rays" along an extra dimension
+    spread = np.eye(n) if stretch == 1 else diagonal_stretch(n, stretch)
     spread = np.broadcast_to(
-            np.eye(rays.shape[-1])[(None,) * (rays.ndim - 2)],
-            rays.shape[:-2] + (rays.shape[-1],) * 2)
+            spread[(None,) * (rays.ndim - 2)], rays.shape[:-2] + (n, n))
     expanded = np.concatenate((transformed, spread), -2)
     expanded_T = np.moveaxis(expanded, -2, -1)
+    # return np.linalg.slogdet(expanded_T @ expanded).logabsdet
     return np.sqrt(np.abs(np.linalg.det(expanded_T @ expanded))) - 1
 
 def fov_fix(arr):
@@ -214,5 +231,27 @@ def slide_voxels(arr, **kw):
 def ndmax(arr):
     return np.unravel_index(arr.argmax(), arr.shape)
 
+def sample(arr=im4, depth=0.155):
+    frame = support_casts(arr, relative_slopes(arr), depth)
+
+    from matplotlib.widgets import Slider
+    fig, ax = plt.subplots()
+    out = ax.imshow(horizon_metric(frame))
+    fig.subplots_adjust(bottom=0.25)
+
+    domain = { "valmin": -4, "valmax": 4, "valinit": 0 }
+    axs = fig.add_axes([0.2, 0.15, 0.7, 0.03])
+    axt = fig.add_axes([0.2, 0.05, 0.7, 0.03])
+    ln_stretch = Slider(ax=axs, label='ln stretch', **domain)
+    ln_scale = Slider(ax=axt, label='ln scale', **domain)
+    def update(val):
+        out.set_data(horizon_metric(
+            np.e ** ln_scale.val * frame, stretch=np.e ** ln_stretch.val))
+        fig.canvas.draw_idle()
+    ln_stretch.on_changed(update)
+    ln_scale.on_changed(update)
+
+    plt.show()
+
 if __name__ == "__main__":
-    slide_voxels(density(im4))
+    sample()
