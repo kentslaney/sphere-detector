@@ -1,7 +1,7 @@
 import pathlib
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import convolve2d
+from scipy.signal import correlate2d
 from functools import partial, cached_property
 import sympy as sy
 from typing import Literal
@@ -51,12 +51,11 @@ im7 = fs(local / "IMG_0007.HEIC", local / "out7.npy")
 im8 = fs(local / "IMG_0008.HEIC", local / "out8.npy")
 
 scharr = np.array([[-3, -10, -3], [0, 0, 0], [3, 10, 3]])
-scharr = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]])
 
 def grad(arr):
     return np.stack((
-        convolve2d(arr, scharr, boundary='symm', mode='same'),
-        convolve2d(arr, scharr.T, boundary='symm', mode='same')), -1) / np.sum(
+        correlate2d(arr, scharr, boundary='symm', mode='same'),
+        correlate2d(arr, scharr.T, boundary='symm', mode='same')), -1) / np.sum(
                 np.abs(scharr))
 
 def hessian(partials):
