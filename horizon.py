@@ -75,7 +75,7 @@ def interpolate(continuous, *a, **kw):
                 overlap[valid][..., 0] * overlap[valid][..., 1])
     return out
 
-def raster_supports(continuous, partials, topk=8):
+def raster_supports(continuous, partials, topk=24):
     sources = np.vstack((
         np.zeros([3, 4, continuous.shape[0]]),
         -np.ones([1, 4, continuous.shape[0]])))
@@ -203,8 +203,9 @@ def horizon_metric(rays, stretch=1):
             spread[(None,) * (rays.ndim - 2)], rays.shape[:-2] + (n, n))
     expanded = np.concatenate((transformed, spread), -2)
     expanded_T = np.moveaxis(expanded, -2, -1)
-    # return np.linalg.slogdet(expanded_T @ expanded).logabsdet
-    return np.sqrt(np.abs(np.linalg.det(expanded_T @ expanded))) - 1
+    # multiplicative vs additive metric; monotonic mapping
+    return np.linalg.slogdet(expanded_T @ expanded).logabsdet
+    # return np.sqrt(np.abs(np.linalg.det(expanded_T @ expanded))) - 1
 
 def fov_fix(arr):
     return 1 - fov_csc * (1 - arr)
@@ -255,8 +256,16 @@ def sample(arr=im4, depth=0.155):
 
     plt.show()
 
+def tmp(arr=im4, depth=0.155, pos=(186, 264), name=None):
+    frame = support_casts(arr, relative_slopes(arr), depth)
+    value = horizon_metric(frame[pos])
+    print(frame[pos])
+    print("horizon metric", *(() if name is None else ("for", name)), value)
+
 if __name__ == "__main__":
-    sample()
+    # sample()
+    tmp(name="signal")
+    tmp(pos=(101, 130), name="noise")
     # slide_voxels(density(im4, cache="voxels4.npy", lo=0.1, hi=0.2))
     # slide_voxels(density(im5, cache="voxels5.npy", lo=0, hi=1))
     # depth_slices()
