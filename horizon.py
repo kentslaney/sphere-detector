@@ -284,7 +284,7 @@ def tmp3(arr=im4):
     return interpolate(orthogonal_centers(arr).reshape(-1, 2))
 
 if __name__ == "__main__":
-    plt.imshow(tmp3())
+    plt.imshow(tmp3(fov_fix(im4)))
     plt.show()
     # sample()
     # tmp(name="signal")
