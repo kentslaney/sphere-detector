@@ -167,10 +167,21 @@ def relative_slopes(arr):
     sec2 = np.divide(
             out[..., 0, 0], out[..., 1, 1],
             out=2 * np.ones_like(arr), where=concave_down)
-    norm = np.sum(partials ** 2, -1)
-    coef = np.divide(sec2 - 1, norm, out=np.ones_like(norm), where=norm != 0)
+    norm2 = np.sum(partials ** 2, -1)
+    coef = np.divide(sec2 - 1, norm2, out=np.ones_like(norm2), where=norm2 != 0)
     slopes = partials * coef[..., None]
     return slopes
+
+def orthogonal_centers(arr):
+    partials = grad(arr)
+    second = hessian(partials)
+    out = rotated(partials, second)
+    concave_down = np.logical_and(np.linalg.det(out) > 0, out[..., 0, 0] < 0)
+    flat_radius_over_norm = np.divide(
+            1, out[..., 1, 1],
+            out=np.zeros_like(arr), where=concave_down)
+    yx = coord - flat_radius_over_norm[..., None] * partials
+    return yx
 
 def depth_slices(arr=im5, **kw):
     slide_partials(arr, relative_slopes(arr), **kw)
@@ -269,8 +280,12 @@ def tmp2(arr=im4, depth=0.155, cmp=2):
     updated = horizon_metric(frame, stretch=cmp)
     return np.sum(np.argsort(nominal) == np.argsort(updated)) / nominal.size
 
+def tmp3(arr=im4):
+    return interpolate(orthogonal_centers(arr).reshape(-1, 2))
+
 if __name__ == "__main__":
-    print(tmp2())
+    plt.imshow(tmp3())
+    plt.show()
     # sample()
     # tmp(name="signal")
     # tmp(pos=(101, 130), name="noise")
