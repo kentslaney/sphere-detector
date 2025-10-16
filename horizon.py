@@ -179,6 +179,7 @@ def cis_h(half_turns):
     half_turns = np.array(half_turns) * np.pi
     return np.stack((np.cos(half_turns), np.sin(half_turns)))
 
+# https://gemini.google.com/share/865177561564
 def diagonal_stretch(ndim, k):
     stretch = np.eye(ndim) * k ** (-1 / (ndim - 1))
     stretch[0, 0] = k
