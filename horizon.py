@@ -201,6 +201,7 @@ def diagonal_stretch(ndim, k):
     symmetric_matrix = rotation @ stretch @ rotation.T
     return symmetric_matrix
 
+# TODO: 3d for converging rays since z is one-sided
 # non-parametric (unknown shape) but zero-pad agnostic
 def horizon_metric(rays, stretch=1):
     assert rays.shape[-2] == 2
