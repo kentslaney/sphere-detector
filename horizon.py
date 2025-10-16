@@ -172,6 +172,7 @@ def relative_slopes(arr):
     slopes = partials * coef[..., None]
     return slopes
 
+# TODO: depth estimates, gradient-based PDF, rethink concave away conditions
 def orthogonal_centers(arr):
     partials = grad(arr)
     second = hessian(partials)
@@ -202,6 +203,9 @@ def diagonal_stretch(ndim, k):
     return symmetric_matrix
 
 # TODO: 3d for converging rays since z is one-sided
+#       actually that'd only be helpful after switching to absolute depth
+#       lots of math could have been avoided with an absolute depth map
+#       actually, the estimates for w ** 2 should solve this
 # non-parametric (unknown shape) but zero-pad agnostic
 def horizon_metric(rays, stretch=1):
     assert rays.shape[-2] == 2
