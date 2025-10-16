@@ -262,10 +262,17 @@ def tmp(arr=im4, depth=0.155, pos=(186, 264), name=None):
     print(frame[pos])
     print("horizon metric", *(() if name is None else ("for", name)), value)
 
+def tmp2(arr=im4, depth=0.155, cmp=2):
+    frame = support_casts(arr, relative_slopes(arr), depth)
+    nominal = horizon_metric(frame)
+    updated = horizon_metric(frame, stretch=cmp)
+    return np.sum(np.argsort(nominal) == np.argsort(updated)) / nominal.size
+
 if __name__ == "__main__":
+    print(tmp2())
     # sample()
-    tmp(name="signal")
-    tmp(pos=(101, 130), name="noise")
+    # tmp(name="signal")
+    # tmp(pos=(101, 130), name="noise")
     # slide_voxels(density(im4, cache="voxels4.npy", lo=0.1, hi=0.2))
     # slide_voxels(density(im5, cache="voxels5.npy", lo=0, hi=1))
     # depth_slices()
