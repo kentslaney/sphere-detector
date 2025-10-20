@@ -6,3 +6,7 @@ coremltools
 scipy
 armpit
 sympy
+opencv-python
+torch
+torchvision
+jupyterlab-vim

@@ -42,13 +42,14 @@ def fs(pth, npy = None):
     im_t = im_s.crop(np.concat((origin, origin + target[::-1])))
     out = np.array(mlmodel.predict({"image": im_t})['depth'])
     if npy is not None:
+        pathlib.Path(npy).parents[0].mkdir(parents=True, exist_ok=True)
         np.save(npy, out)
     return out
 
-im4 = fs(local / "IMG_0004.HEIC", local / "out4.npy")
-im5 = fs(local / "IMG_0005.HEIC", local / "out5.npy")
-im7 = fs(local / "IMG_0007.HEIC", local / "out7.npy")
-im8 = fs(local / "IMG_0008.HEIC", local / "out8.npy")
+im4 = fs(local / "IMG_0004.HEIC", local / "cache" / "out4.npy")
+im5 = fs(local / "IMG_0005.HEIC", local / "cache" / "out5.npy")
+im7 = fs(local / "IMG_0007.HEIC", local / "cache" / "out7.npy")
+im8 = fs(local / "IMG_0008.HEIC", local / "cache" / "out8.npy")
 
 scharr = np.array([[-3, -10, -3], [0, 0, 0], [3, 10, 3]])
 
