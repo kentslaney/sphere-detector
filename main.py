@@ -6,6 +6,8 @@ from functools import partial, cached_property
 import sympy as sy
 
 local = pathlib.Path(__file__).parents[0]
+examples_dir = local / "assets" / "examples"
+cache_dir = local / "cache"
 mlmodel = None
 target = np.array([392, 518])
 coord = np.stack(np.meshgrid(*map(np.arange, target[::-1]))[::-1], -1)
@@ -43,8 +45,8 @@ def fs(pth, npy = None):
         np.save(npy, out)
     return out
 
-im4 = fs(local / "IMG_0004.HEIC", local / "cache" / "out4.npy")
-im5 = fs(local / "IMG_0005.HEIC", local / "cache" / "out5.npy")
+im4 = fs(examples_dir / "IMG_0004.HEIC", cache_dir / "out4.npy")
+im5 = fs(examples_dir / "IMG_0005.HEIC", cache_dir / "out5.npy")
 
 def grad(arr):
     return np.stack((sobel(arr, 0), sobel(arr, 1)), -1) / 8
