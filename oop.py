@@ -1,0 +1,232 @@
+import sys, pathlib
+from functools import cached_property
+
+import numpy as np
+from scipy.signal import correlate2d
+
+from PIL import Image
+from pillow_heif import register_heif_opener
+register_heif_opener()
+
+local = pathlib.Path(__file__).parents[0]
+
+class Mlp:
+    model_configs = {
+        'vits': {'features': 64, 'out_channels': [48, 96, 192, 384]},
+        'vitb': {'features': 128, 'out_channels': [96, 192, 384, 768]},
+        'vitl': {'features': 256, 'out_channels': [256, 512, 1024, 1024]},
+        'vitg': {'features': 384, 'out_channels': [1536, 1536, 1536, 1536]},
+    }
+    size_mapping = { 'vits': 'Small', 'vitb': 'Base', 'vitl': 'Large' }
+
+    def __init__(self, encoder):
+        self.encoder = encoder
+
+    @property
+    def model_config(self):
+        return { "encoder": self.encoder, **self.model_configs[self.encoder] }
+
+    @property
+    def model_repo(self):
+        size = self.size_mapping[self.encoder]
+        return f'https://huggingface.co/depth-anything/Depth-Anything-V2-{size}'
+
+    @property
+    def model_path(self):
+        return f'main/depth_anything_v2_{self.encoder}.pth'
+
+    @property
+    def model_url(self):
+        return f'{self.model_repo}/resolve/{self.model_path}?download=true'
+
+    @cached_property
+    def model(self):
+        import torch
+        sys.path.insert(0, str(local / "assets" / "depth_anything_v2"))
+        from depth_anything_v2.dpt import DepthAnythingV2
+        sys.path.pop(0)
+
+        DEVICE = 'cuda' if torch.cuda.is_available() else \
+                'mps' if torch.backends.mps.is_available() else 'cpu'
+
+        model = DepthAnythingV2(**self.model_config)
+        model.load_state_dict(torch.hub.load_state_dict_from_url(
+                self.model_url, map_location='cpu'))
+        return model.to(DEVICE).eval()
+
+    def __call__(self, im):
+        return np.array(self.model.infer_image(np.array(im)))
+
+class Raster:
+    model = Mlp('vits')
+    target = None
+    f_35mm = None
+
+    @classmethod
+    def file(cls, path, npy=None):
+        cache = None
+        if npy is not None:
+            npy = pathlib.Path(npy)
+            if npy.exists():
+                cache = np.load(npy)
+                if cls.target is not None and np.all(cache.shape != cls.target):
+                    cache = None
+        obj = cls(Image.open(path), cache)
+        if npy is not None:
+            npy.parents[0].mkdir(parents=True, exist_ok=True)
+            np.save(npy, obj.cache)
+        return obj
+
+    @cached_property
+    def cache(self):
+        return self.model(self.cropped())
+
+    @property
+    def depth(self):
+        return self.cache
+
+    @property
+    def shape(self):
+        return np.array(self.full.size if self.target is None else self.target)
+
+    @property
+    def coord(self):
+        x, y = np.meshgrid(*map(np.arange, self.shape[::-1]))
+        return np.stack((y, x), -1)
+
+    def cropped(self):
+        if self.target is None:
+            return self.full
+        size = np.array(self.full.size)
+        scaled = np.int32(np.max(self.shape / size) * size)
+        resample = self.full.resize(scaled)
+        origin = (scaled - self.shape[::-1]) // 2
+        return resample.crop(np.concat((origin, origin + self.shape[::-1])))
+
+    def __init__(self, im, cache=None):
+        self.full = im
+        if cache is not None:
+            self.cache = cache
+
+    @staticmethod
+    def scharr(arr):
+        kernel = np.array([[-3, -10, -3], [0, 0, 0], [3, 10, 3]])
+        l1 = np.sum(np.abs(kernel))
+        kw = { 'boundary': 'symm', 'mode': 'same' }
+        return np.stack((
+                correlate2d(arr, kernel, **kw),
+                correlate2d(arr, kernel.T, **kw)), -1) / l1
+
+    @cached_property
+    def norm2(self):
+        return np.sum(self.grad ** 2, -1, keepdims=True)
+
+    @cached_property
+    def norm(self):
+        return np.sqrt(self.norm2)
+
+    @cached_property
+    def grad(self):
+        return self.scharr(self.depth)
+
+    @cached_property
+    def hessian(self):
+        return np.stack((
+                self.scharr(self.grad[..., 0]),
+                self.scharr(self.grad[..., 1])), -1)
+
+    @cached_property
+    def rotated(self):
+        basis0 = np.divide(
+                self.grad, self.norm, where=self.norm != 0,
+                out=np.zeros_like(self.grad))
+        basis1 = basis0[..., ::-1] * np.array([[[-1, 1]]])
+        basis = np.stack((basis0, basis1), -1)
+        inv = basis * np.array([[[[1, -1], [-1, 1]]]])
+        return inv @ self.hessian @ basis
+
+    @cached_property
+    def inwards(self):
+        convex = np.logical_and(
+                np.linalg.det(self.rotated) > 0, self.rotated[..., 0, 0] < 0)
+        return np.logical_and(
+                convex, self.rotated[..., 0, 0] <= self.rotated[..., 1, 1])
+
+    @cached_property
+    def flat_radius_over_norm(self):
+        return np.divide(
+                1, self.rotated[..., 1, 1], where=self.inwards,
+                out=np.zeros(self.shape))
+
+    @cached_property
+    def centers(self):
+        return self.coord - self.flat_radius_over_norm[..., None] * self.grad
+
+    @cached_property
+    def w2(self):
+        sec2 = np.divide(
+                self.rotated[..., 0, 0],
+                self.rotated[..., 1, 1],
+                where=self.inwards,
+
+                out=np.ones_like(arr))
+
+        return np.divide(
+                sec2 - 1, self.norm2, where=self.norm2 != 0,
+                out=np.ones_like(self.norm2))
+
+    @cached_property
+    def w(self):
+        return np.sqrt(self.w2)
+
+    def interpolate(self, continuous):
+        if continuous.shape[-1] == 2 and continuous.ndim > 2:
+            continuous = continuous.reshape(-1, 2)
+        out = np.zeros(self.shape)
+        floored = np.int32(np.floor(continuous))
+        remainder = continuous - floored
+        for offset in np.array([[[0, 0]], [[0, 1]], [[1, 0]], [[1, 1]]]):
+            filling = floored + offset
+            overlap = 1 - offset + (2 * offset - 1) * remainder
+            valid = np.all(np.logical_and(
+                    filling >= 0, filling < self.shape[None]), axis=1)
+            np.add.at(
+                    out,
+                    (filling[valid][..., 0], filling[valid][..., 1]),
+                    overlap[valid][..., 0] * overlap[valid][..., 1])
+        return out
+
+class Perspective(Raster):
+    f_35mm = None
+
+    @property
+    def f_px(self):
+        return self.f_35mm / 35 * np.linalg.norm(self.shape)
+
+    @property
+    def fov_csc(self):
+        f_center = (self.coord - self.shape[None] / 2) / self.f_px
+        return np.sqrt(1 + np.sum(f_center ** 2, axis=-1))
+
+    @cached_property
+    def depth(self):
+        if self.f_35mm is None:
+            return self.cache
+        return self.fov_csc * self.cache
+
+class M2(Perspective):
+    target = (392, 518)
+    f_35mm = 18
+
+examples_dir = local / "assets" / "examples"
+cache_dir = local / "cache"
+
+im4 = M2.file(examples_dir / "IMG_0004.HEIC", cache_dir / "out4.npy")
+im5 = M2.file(examples_dir / "IMG_0005.HEIC", cache_dir / "out5.npy")
+im7 = M2.file(examples_dir / "IMG_0007.HEIC", cache_dir / "out7.npy")
+im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    plt.imshow(im4.interpolate(im4.centers))
+    plt.show()
