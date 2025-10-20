@@ -46,7 +46,7 @@ def fs(pth, npy = None):
     im_t = im_s.crop(np.concat((origin, origin + target[::-1])))
     out = np.array(mlmodel.predict({"image": im_t})['depth'])
     if npy is not None:
-        pathlib.Path(npy).parents[0].mkdir(parents=True, exist_ok=True)
+        npy.parents[0].mkdir(parents=True, exist_ok=True)
         np.save(npy, out)
     return out
 
