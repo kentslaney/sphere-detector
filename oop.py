@@ -57,6 +57,36 @@ class Da2:
     def __call__(self, im):
         return np.array(self.model.infer_image(np.array(im)))
 
+class Horizon:
+    def __init__(self, stretch=1):
+        self.stretch = stretch
+
+    def diagonal(self, topk):
+        if self.stretch == 1:
+            return np.eye(topk)
+        stretch = np.eye(topk) * self.stretch ** (-1 / (topk - 1))
+        stretch[0, 0] = self.stretch
+        initial_basis = np.eye(topk)
+        initial_basis[:, 0] = np.ones(topk)
+        # Q is orthonormal with a matching direction for the first vector
+        rotation, _ = np.linalg.qr(initial_basis)
+        symmetric_matrix = rotation @ stretch @ rotation.T
+        return symmetric_matrix
+
+    def __call__(self, cylindrical):
+        assert 1 < cylindrical.shape[-1] < 4
+        topk = cylindrical.shape[-2]
+        halved = np.atan2(cylindrical[..., 0], cylindrical[..., 1]) / 2
+        transformed = np.stack((np.cos(halved), np.sin(halved)), -1) * \
+                np.linalg.norm(cylindrical, axis=-1, keepdims=True)
+        spread = np.broadcast_to(
+                self.diagonal(topk)[(None,) * (cylindrical.ndim - 2)],
+                cylindrical.shape[:-2] + (topk, topk))
+        expanded_T = np.concatenate(
+                (transformed, cylindrical[..., 2:], spread), -1)
+        expanded = np.moveaxis(expanded_T, -2, -1)
+        return np.linalg.slogdet(expanded_T @ expanded).logabsdet
+
 class Raster:
     model = Da2('vits')
     target = None
@@ -262,4 +292,8 @@ im5 = M2.file(examples_dir / "IMG_0005.HEIC", cache_dir / "out5.npy")
 im7 = M2.file(examples_dir / "IMG_0007.HEIC", cache_dir / "out7.npy")
 im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
 
-bin4 = im4.bin(im4.centers, im4.norm2, im4.grad)
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    bin4 = im4.bin(im4.centers, im4.norm2, im4.grad)
+    plt.imshow(Horizon(1.1)(bin4))
+    plt.show()
