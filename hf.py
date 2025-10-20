@@ -26,7 +26,7 @@ def mlpackage():
     register_heif_opener()
 
     import torch, sys
-    sys.path.insert(0, str(local / "depth_anything_v2"))
+    sys.path.insert(0, str(local / "assets" / "depth_anything_v2"))
     from depth_anything_v2.dpt import DepthAnythingV2
 
     DEVICE = 'cuda' if torch.cuda.is_available() else \

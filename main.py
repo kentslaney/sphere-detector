@@ -23,7 +23,9 @@ def mlpackage():
     register_heif_opener()
 
     import coremltools as ct
-    return ct.models.MLModel('DepthAnythingV2SmallF16.mlpackage')
+    return ct.models.MLModel(str(
+            local / 'assets' / 'coreml_depth_anything_v2_small' /
+            'DepthAnythingV2SmallF16.mlpackage'))
 
 def fs(pth, npy = None):
     global mlmodel
