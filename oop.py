@@ -10,7 +10,7 @@ register_heif_opener()
 
 local = pathlib.Path(__file__).parents[0]
 
-class Mlp:
+class Da2:
     model_configs = {
         'vits': {'features': 64, 'out_channels': [48, 96, 192, 384]},
         'vitb': {'features': 128, 'out_channels': [96, 192, 384, 768]},
@@ -58,7 +58,7 @@ class Mlp:
         return np.array(self.model.infer_image(np.array(im)))
 
 class Raster:
-    model = Mlp('vits')
+    model = Da2('vits')
     target = None
     f_35mm = None
 
@@ -180,7 +180,7 @@ class Raster:
     def w(self):
         return np.sqrt(self.w2)
 
-    def interpolate(self, continuous):
+    def rasterize(self, continuous):
         assert continuous.shape[-1] == 2
         if continuous.ndim > 2:
             continuous = continuous.reshape(-1, 2)
@@ -230,5 +230,5 @@ im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    plt.imshow(im4.interpolate(im4.centers))
+    plt.imshow(im4.rasterize(im4.centers))
     plt.show()
