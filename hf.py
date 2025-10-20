@@ -30,10 +30,13 @@ def mlpackage():
     DEVICE = 'cuda' if torch.cuda.is_available() else \
             'mps' if torch.backends.mps.is_available() else 'cpu'
 
+    model_repo = lambda size: \
+        f'https://huggingface.co/depth-anything/Depth-Anything-V2-{size}'
+    model_path = lambda encoder: f'resolve/main/depth_anything_v2_{encoder}.pth'
     model_urls = {
-        'vits': 'https://huggingface.co/depth-anything/Depth-Anything-V2-Small/resolve/main/depth_anything_v2_vits.pth?download=true',
-        'vitb': 'https://huggingface.co/depth-anything/Depth-Anything-V2-Base/resolve/main/depth_anything_v2_vitb.pth?download=true',
-        'vitl': 'https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth?download=true',
+        'vits': f'{model_repo('Small')}/{model_path('vits')}?download=true',
+        'vitb': f'{model_repo('Base')}/{model_path('vitb')}?download=true',
+        'vitl': f'{model_repo('Large')}/{model_path('vitl')}?download=true',
     }
 
     model_configs = {
