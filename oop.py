@@ -119,7 +119,7 @@ class Raster:
 
     @cached_property
     def norm2(self):
-        return np.sum(self.grad ** 2, -1, keepdims=True)
+        return np.sum(self.grad ** 2, -1)
 
     @cached_property
     def norm(self):
@@ -137,8 +137,9 @@ class Raster:
 
     @cached_property
     def rotated(self):
+        norm = self.norm[..., None]
         basis0 = np.divide(
-                self.grad, self.norm, where=self.norm != 0,
+                self.grad, norm, where=norm != 0,
                 out=np.zeros_like(self.grad))
         basis1 = basis0[..., ::-1] * np.array([[[-1, 1]]])
         basis = np.stack((basis0, basis1), -1)
@@ -169,18 +170,19 @@ class Raster:
                 self.rotated[..., 1, 1],
                 where=self.inwards,
 
-                out=np.ones_like(arr))
+                out=np.ones(self.shape))
 
         return np.divide(
                 sec2 - 1, self.norm2, where=self.norm2 != 0,
-                out=np.ones_like(self.norm2))
+                out=np.ones(self.shape))
 
     @cached_property
     def w(self):
         return np.sqrt(self.w2)
 
     def interpolate(self, continuous):
-        if continuous.shape[-1] == 2 and continuous.ndim > 2:
+        assert continuous.shape[-1] == 2
+        if continuous.ndim > 2:
             continuous = continuous.reshape(-1, 2)
         out = np.zeros(self.shape)
         floored = np.int32(np.floor(continuous))
