@@ -198,6 +198,40 @@ class Raster:
                     overlap[valid][..., 0] * overlap[valid][..., 1])
         return out
 
+    def bin(self, continuous, priority, data, topk=8):
+        slots = data.shape[-1]
+        assert continuous.ndim == priority.ndim + 1 == data.ndim
+        assert continuous.shape[-1] == 2
+        assert continuous.size // 2 == priority.size == data.size // slots
+        if continuous.ndim > 2:
+            continuous = continuous.reshape(-1, 2)
+            priority = priority.reshape(-1)
+            data = data.reshape(-1, slots)
+
+        sources = np.vstack((
+            np.zeros([slots + 1, continuous.shape[0] + 1]),
+            -np.ones([1, continuous.shape[0] + 1])))
+        floored = np.int32(np.floor(continuous))
+
+        valid = np.all(np.logical_and(
+                floored >= 0, floored < self.shape[None]), axis=1)
+        floored, priority, data = floored[valid], priority[valid], data[valid]
+        flat_index = floored[..., 0] * self.shape[1] + floored[..., 1]
+        sources[:, :flat_index.shape[0]] = \
+                np.vstack((data.T, -priority[None], flat_index[None]))
+
+        sources = sources[:, np.lexsort(sources)]
+        coord_flat, offset, counts = np.unique(
+                sources[-1], return_index=True, return_counts=True)
+        keeping = np.arange(topk)[None] < counts[:, None]
+        ref = (offset[:, None] + np.arange(topk)[None]) * keeping
+        deref = sources[:slots, np.ravel(ref)].reshape(slots, -1, topk)
+        deref = np.transpose(deref, axes=(1, 2, 0))
+        deref, coord_flat = deref[1:], np.int32(coord_flat[1:])
+        out = np.zeros(self.shape.tolist() + [topk, slots])
+        out[coord_flat // self.shape[1], coord_flat % self.shape[1]] = deref
+        return out
+
 class Perspective(Raster):
     f_35mm = None
 
@@ -228,7 +262,4 @@ im5 = M2.file(examples_dir / "IMG_0005.HEIC", cache_dir / "out5.npy")
 im7 = M2.file(examples_dir / "IMG_0007.HEIC", cache_dir / "out7.npy")
 im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
 
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    plt.imshow(im4.rasterize(im4.centers))
-    plt.show()
+bin4 = im4.bin(im4.centers, im4.norm2, im4.grad)
