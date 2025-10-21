@@ -58,20 +58,8 @@ class Da2:
         return np.array(self.model.infer_image(np.array(im)))
 
 class Horizon:
-    def __init__(self, stretch=1):
-        self.stretch = stretch
-
     def diagonal(self, topk):
-        if self.stretch == 1:
-            return np.eye(topk)
-        stretch = np.eye(topk) * self.stretch ** (-1 / (topk - 1))
-        stretch[0, 0] = self.stretch
-        initial_basis = np.eye(topk)
-        initial_basis[:, 0] = np.ones(topk)
-        # Q is orthonormal with a matching direction for the first vector
-        rotation, _ = np.linalg.qr(initial_basis)
-        symmetric_matrix = rotation @ stretch @ rotation.T
-        return symmetric_matrix
+        return np.eye(topk)
 
     def __call__(self, cylindrical):
         assert 1 < cylindrical.shape[-1] < 4
@@ -87,9 +75,26 @@ class Horizon:
         expanded = np.moveaxis(expanded_T, -2, -1)
         return np.linalg.slogdet(expanded_T @ expanded).logabsdet
 
+class StretchedHorizon(Horizon):
+    def __init__(self, stretch=1):
+        self.stretch = stretch
+
+    def diagonal(self, topk):
+        if self.stretch == 1:
+            return super.diagonal(topk)
+        stretch = np.eye(topk) * self.stretch ** (-1 / (topk - 1))
+        stretch[0, 0] = self.stretch
+        initial_basis = np.eye(topk)
+        initial_basis[:, 0] = np.ones(topk)
+        # Q is orthonormal with a matching direction for the first vector
+        rotation, _ = np.linalg.qr(initial_basis)
+        symmetric_matrix = rotation @ stretch @ rotation.T
+        return symmetric_matrix
+
 class Raster:
     model = Da2('vits')
-    metric = Horizon(1)
+    metric = Horizon()
+    topk = 8
     target = None
     f_35mm = None
 
@@ -261,20 +266,35 @@ class Raster:
         deref = sources[:slots, np.ravel(ref)].reshape(slots, -1, topk)
         deref = np.transpose(deref, axes=(1, 2, 0))
         deref, coord_flat = deref[1:], np.int32(coord_flat[1:])
-        out = np.zeros(self.shape.tolist() + [topk, slots])
+        out = np.zeros(tuple(self.shape.tolist()) + (topk, slots))
         out[coord_flat // self.shape[1], coord_flat % self.shape[1]] = deref
         return out
 
     @cached_property
-    def metered(self):
+    def binned(self):
         dz = np.divide(
                 1, self.w, where=self.w != 0,
                 out=np.ones(self.shape))[..., None]
         # gradient for the spheroid if it was a sphere
         unsquished = np.concatenate((self.grad, dz), -1)
         normed = unsquished / np.linalg.norm(unsquished, axis=-1, keepdims=True)
-        return self.metric(self.bin(
-            self.centers[self.inwards], normed[self.inwards]))
+        return self.bin(
+            self.centers[self.inwards], normed[self.inwards], topk=self.topk)
+
+    @cached_property
+    def corners(self):
+        bins = self.binned
+        slots = bins.shape[-1]
+        copies = np.zeros(tuple(self.shape.tolist()) + (4, self.topk, slots))
+        copies[:, :, 0, :, :] = bins[:, :]
+        copies[:-1, :, 1, :, :] = bins[1:, :]
+        copies[:, :-1, 2, :, :] = bins[:, 1:]
+        copies[:-1, :-1, 3, :, :] = bins[1:, 1:]
+        return copies.reshape(tuple(self.shape.tolist()) + (-1, slots))
+
+    @cached_property
+    def metered(self):
+        return self.metric(self.corners)
 
 class Perspective(Raster):
     f_35mm = None
