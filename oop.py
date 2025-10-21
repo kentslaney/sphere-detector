@@ -273,7 +273,8 @@ class Raster:
         # gradient for the spheroid if it was a sphere
         unsquished = np.concatenate((self.grad, dz), -1)
         normed = unsquished / np.linalg.norm(unsquished, axis=-1, keepdims=True)
-        return self.metric(self.bin(self.centers, normed))
+        return self.metric(self.bin(
+            self.centers[self.inwards], normed[self.inwards]))
 
 class Perspective(Raster):
     f_35mm = None
@@ -308,5 +309,5 @@ im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    plt.imshow(im5.metered)
+    plt.imshow(im4.metered)
     plt.show()
