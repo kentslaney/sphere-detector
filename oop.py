@@ -89,6 +89,7 @@ class Horizon:
 
 class Raster:
     model = Da2('vits')
+    metric = Horizon(1)
     target = None
     f_35mm = None
 
@@ -228,8 +229,10 @@ class Raster:
                     overlap[valid][..., 0] * overlap[valid][..., 1])
         return out
 
-    def bin(self, continuous, priority, data, topk=8):
+    def bin(self, continuous, data, priority=None, topk=8):
         slots = data.shape[-1]
+        if priority is None:
+            priority = np.random.uniform(size=continuous.shape[:-1])
         assert continuous.ndim == priority.ndim + 1 == data.ndim
         assert continuous.shape[-1] == 2
         assert continuous.size // 2 == priority.size == data.size // slots
@@ -262,6 +265,16 @@ class Raster:
         out[coord_flat // self.shape[1], coord_flat % self.shape[1]] = deref
         return out
 
+    @cached_property
+    def metered(self):
+        dz = np.divide(
+                1, self.w, where=self.w != 0,
+                out=np.ones(self.shape))[..., None]
+        # gradient for the spheroid if it was a sphere
+        unsquished = np.concatenate((self.grad, dz), -1)
+        normed = unsquished / np.linalg.norm(unsquished, axis=-1, keepdims=True)
+        return self.metric(self.bin(self.centers, normed))
+
 class Perspective(Raster):
     f_35mm = None
 
@@ -270,7 +283,7 @@ class Perspective(Raster):
         return self.f_35mm / 35 * np.linalg.norm(self.shape)
 
     @property
-    def fov_csc(self):
+    def fov_sec(self):
         f_center = (self.coord - self.shape[None] / 2) / self.f_px
         return np.sqrt(1 + np.sum(f_center ** 2, axis=-1))
 
@@ -278,7 +291,8 @@ class Perspective(Raster):
     def depth(self):
         if self.f_35mm is None:
             return self.cache
-        return self.fov_csc * self.cache
+        # trends the right direction since depths are flipped
+        return self.cache / self.fov_sec
 
 class M2(Perspective):
     target = (392, 518)
@@ -294,6 +308,5 @@ im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    bin4 = im4.bin(im4.centers, im4.norm2, im4.grad)
-    plt.imshow(Horizon(1.1)(bin4))
+    plt.imshow(im5.metered)
     plt.show()
