@@ -6,7 +6,6 @@ import xml.etree.ElementTree as ET
 
 ds12, info12 = tfds.load("imagenet2012", with_info=True)
 balls = [
-    (417, 'n02782093', 'balloon'),
     (429, 'n02799071', 'baseball'),
     (430, 'n02802426', 'basketball'),
     (522, 'n03134739', 'croquet_ball'),
