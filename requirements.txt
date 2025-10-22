@@ -10,3 +10,5 @@ opencv-python
 torch
 torchvision
 jupyterlab-vim
+tensorflow_datasets
+tensorflow[and-cuda]
