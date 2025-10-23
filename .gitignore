@@ -3,3 +3,5 @@ env
 .ipynb_checkpoints
 /cache
 voxels*.npy
+/assets/data
+__pycache__

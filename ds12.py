@@ -1,25 +1,21 @@
 # imagenet-1k bounding boxes
-import pathlib
+import pathlib, sys
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import xml.etree.ElementTree as ET
 
+local = pathlib.Path(__file__).parents[0]
+sys.path.insert(0, str(local))
+from wn12 import balls
+sys.path.pop(0)
+
 ds12, info12 = tfds.load("imagenet2012", with_info=True)
-balls = [
-    (429, 'n02799071', 'baseball'),
-    (430, 'n02802426', 'basketball'),
-    (522, 'n03134739', 'croquet_ball'),
-    (574, 'n03445777', 'golf_ball'),
-    (722, 'n03942813', 'ping-pong_ball'),
-    (805, 'n04254680', 'soccer_ball'),
-    (852, 'n04409515', 'tennis_ball'),
-    (890, 'n04540053', 'volleyball')
-]
 
 ids = tf.constant(next(zip(*balls)), dtype=tf.int64)
 data_base = pathlib.Path(info12.data_dir).parents[0]
 bboxes = data_base / "ILSVRC2012_bbox_train_v2"
-assert bboxes.exists()
+if not bboxes.is_dir():
+    raise FileNotFoundError(f"missing extracted bounding boxes at {bboxes}")
 
 parse = lambda path: ET.parse(path).getroot()
 tagname = lambda tag, root: filter(lambda x: x.tag == tag, root)
@@ -81,6 +77,7 @@ def write_balls():
                 write_example(writer, file)
 
 if not ball_records.exists():
+    print("writing bounding box records")
     write_balls()
 
 def read_tfrecord(records):

@@ -12,3 +12,4 @@ torchvision
 jupyterlab-vim
 tensorflow_datasets
 tensorflow[and-cuda]
+nltk
