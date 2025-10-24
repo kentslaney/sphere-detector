@@ -1,5 +1,6 @@
 import sys, pathlib
-from functools import cached_property
+from functools import cached_property, partial
+from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
@@ -51,7 +52,7 @@ key = jax.random.key(0)
 class Raster:
     model = Da2('vits')
     metric = staticmethod(horizon)
-    topk = 4
+    topk = 8
     target = None
     f_35mm = None
 
@@ -75,9 +76,9 @@ class Raster:
     def cache(self):
         return self.model(self.cropped())
 
-    @property
+    @cached_property
     def depth(self):
-        return self.cache
+        return Depth(self.cache)
 
     @property
     def shape(self):
@@ -101,6 +102,21 @@ class Raster:
         self.full = im
         if cache is not None:
             self.cache = cache
+
+@partial(
+        jax.tree_util.register_dataclass, data_fields=["depth"], meta_fields=[])
+@dataclass
+class Depth(object):
+    depth: any
+
+    @property
+    def shape(self):
+        return jnp.array(self.depth.shape)
+
+    @property
+    def coord(self):
+        x, y = jnp.meshgrid(*map(jnp.arange, self.depth.shape[::-1]))
+        return jnp.stack((y, x), -1)
 
     @staticmethod
     def scharr(arr):
@@ -168,7 +184,7 @@ class Raster:
         assert continuous.shape[-1] == 2
         if continuous.ndim > 2:
             continuous = continuous.reshape(-1, 2)
-        out = jnp.zeros(self.shape)
+        out = jnp.zeros(self.depth.shape)
         floored = jnp.int32(jnp.floor(continuous))
         remainder = continuous - floored
         for offset in jnp.array([[[0, 0]], [[0, 1]], [[1, 0]], [[1, 1]]]):
@@ -176,10 +192,9 @@ class Raster:
             overlap = 1 - offset + (2 * offset - 1) * remainder
             valid = jnp.all(jnp.logical_and(
                     filling >= 0, filling < self.shape[None]), axis=1)
-            jnp.add.at(
-                    out,
-                    (filling[valid][..., 0], filling[valid][..., 1]),
-                    overlap[valid][..., 0] * overlap[valid][..., 1])
+            filling = jnp.where(valid[:, None], filling, self.shape[None])
+            out = out.at[filling[..., 0], filling[..., 1]].add(
+                    overlap[..., 0] * overlap[..., 1], mode="drop")
         return out
 
     def bin(self, continuous, data, priority=None, topk=8):
@@ -221,19 +236,17 @@ class Raster:
         out = out.at[r, c].set(deref)
         return out
 
-    @cached_property
-    def binned(self):
+    def binned(self, topk=8):
         dz = jnp.where(self.w != 0, 1 / self.w, 1)[..., None]
         # gradient for the spheroid if it was a sphere
         unsquished = jnp.concatenate((self.grad, dz), -1)
         normed = unsquished / jnp.linalg.norm(
                 unsquished, axis=-1, keepdims=True)
         return self.bin(
-            self.centers[self.inwards], normed[self.inwards], topk=self.topk)
+            self.centers[self.inwards], normed[self.inwards], topk=topk)
 
-    @cached_property
-    def corners(self):
-        bins = self.binned
+    def corners(self, topk=8):
+        bins = self.binned(topk)
         slots = bins.shape[-1]
         copies = jnp.zeros(tuple(self.shape.tolist()) + (4, self.topk, slots))
         copies = copies.at[:, :, 0, :, :].set(bins[:, :])
@@ -244,7 +257,12 @@ class Raster:
 
     @cached_property
     def metered(self):
-        return self.metric(self.binned)
+        return self.metric(self.binned())
+
+    @jax.jit
+    def density(self):
+        arr = jnp.where(self.inwards[..., None], self.centers, -1)
+        return self.rasterize(arr)
 
 class Perspective(Raster):
     f_35mm = None
@@ -261,9 +279,9 @@ class Perspective(Raster):
     @cached_property
     def depth(self):
         if self.f_35mm is None:
-            return self.cache
+            return Depth(self.cache)
         # trends the right direction since depths are flipped
-        return self.cache / self.fov_sec
+        return Depth(self.cache / self.fov_sec)
 
 class M2(Perspective):
     target = (392, 518)
@@ -279,5 +297,5 @@ im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    plt.imshow(im4.metered)
+    plt.imshow(im4.depth.density())
     plt.show()
