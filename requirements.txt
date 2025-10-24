@@ -12,3 +12,5 @@ torchvision
 jupyterlab-vim
 tensorflow_datasets
 tensorflow[and-cuda]
+jax[cuda13]
+transformers
