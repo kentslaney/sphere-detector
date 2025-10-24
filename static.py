@@ -47,12 +47,9 @@ def horizon(cylindrical):
     expanded = jnp.moveaxis(expanded_T, -2, -1)
     return jnp.linalg.slogdet(expanded_T @ expanded).logabsdet
 
-key = jax.random.key(0)
-
 class Raster:
     model = Da2('vits')
     metric = staticmethod(horizon)
-    topk = 8
     target = None
     f_35mm = None
 
@@ -184,7 +181,7 @@ class Depth(object):
         assert continuous.shape[-1] == 2
         if continuous.ndim > 2:
             continuous = continuous.reshape(-1, 2)
-        out = jnp.zeros(self.depth.shape)
+        out = jnp.zeros(self.depth.shape, dtype=self.depth.dtype)
         floored = jnp.int32(jnp.floor(continuous))
         remainder = continuous - floored
         for offset in jnp.array([[[0, 0]], [[0, 1]], [[1, 0]], [[1, 1]]]):
@@ -198,11 +195,7 @@ class Depth(object):
         return out
 
     def bin(self, continuous, data, priority=None, topk=8):
-        global key
         slots = data.shape[-1]
-        if priority is None:
-            key, subkey = jax.random.split(key)
-            priority = jax.random.uniform(subkey, shape=continuous.shape[:-1])
         assert continuous.ndim == priority.ndim + 1 == data.ndim
         assert continuous.shape[-1] == 2
         assert continuous.size // 2 == priority.size == data.size // slots
@@ -248,7 +241,7 @@ class Depth(object):
     def corners(self, topk=8):
         bins = self.binned(topk)
         slots = bins.shape[-1]
-        copies = jnp.zeros(tuple(self.shape.tolist()) + (4, self.topk, slots))
+        copies = jnp.zeros(tuple(self.shape.tolist()) + (4, topk, slots))
         copies = copies.at[:, :, 0, :, :].set(bins[:, :])
         copies = copies.at[:-1, :, 1, :, :].set(bins[1:, :])
         copies = copies.at[:, :-1, 2, :, :].set(bins[:, 1:])
@@ -290,12 +283,12 @@ class M2(Perspective):
 examples_dir = local / "assets" / "examples"
 cache_dir = local / "cache"
 
-im4 = M2.file(examples_dir / "IMG_0004.HEIC", cache_dir / "out4.npy")
-im5 = M2.file(examples_dir / "IMG_0005.HEIC", cache_dir / "out5.npy")
-im7 = M2.file(examples_dir / "IMG_0007.HEIC", cache_dir / "out7.npy")
-im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
-
 if __name__ == "__main__":
+    im4 = M2.file(examples_dir / "IMG_0004.HEIC", cache_dir / "out4.npy")
+    im5 = M2.file(examples_dir / "IMG_0005.HEIC", cache_dir / "out5.npy")
+    im7 = M2.file(examples_dir / "IMG_0007.HEIC", cache_dir / "out7.npy")
+    im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
+
     import matplotlib.pyplot as plt
     plt.imshow(im4.depth.density())
     plt.show()

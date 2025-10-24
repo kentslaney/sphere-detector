@@ -6,3 +6,4 @@ voxels*.npy
 /assets/data
 /assets/downloads
 __pycache__
+/dist
