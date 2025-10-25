@@ -1,10 +1,13 @@
 import pathlib, sys
 local = pathlib.Path(__file__).parents[0]
 sys.path.insert(0, str(local))
-from static import Depth
+from static import Depth, M2
 sys.path.pop(0)
 
+target = M2.target
+
 def jax_density(x):
+    x = x.reshape(target)
     return Depth(x).density()
 
 import jax
@@ -15,7 +18,7 @@ from jax.export import export
 import jax.numpy as jnp
 
 context = jax_mlir.make_ir_context()
-input_shapes = (jnp.zeros((392, 518), dtype=jnp.float16),)
+input_shapes = (jnp.zeros((1, 1) + target, dtype=jnp.float16),)
 jax_exported = export(jax.jit(jax_density))(*input_shapes)
 hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 
@@ -29,6 +32,7 @@ cml_model = ct.convert(
     source="milinternal",
     minimum_deployment_target=ct.target.iOS18,
     pass_pipeline=DEFAULT_HLO_PIPELINE,
+    inputs=[ct.ImageType("_arg0", shape=target, color_layout=ct.colorlayout.GRAYSCALE_FLOAT16, channel_first=True)],
 )
 
 dist = local / "dist"
