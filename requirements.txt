@@ -14,3 +14,4 @@ tensorflow_datasets
 tensorflow[and-cuda]
 jax[cuda13]
 transformers
+-e ./assets/stablehlo_coreml

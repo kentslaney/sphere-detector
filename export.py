@@ -7,17 +7,27 @@ sys.path.pop(0)
 def jax_density(x):
     return Depth(x).density()
 
-from jax.experimental import jax2tf
-import tensorflow as tf
+import jax
+from jax._src.lib.mlir import ir
+from jax._src.interpreters import mlir as jax_mlir
+from jax.export import export
 
-tf_density = tf.function(
-        jax2tf.convert(jax_density), autograph=False,
-        input_signature=[tf.TensorSpec([392, 518], tf.float16)])
-conc_density = tf_density.get_concrete_function()
+import jax.numpy as jnp
+
+context = jax_mlir.make_ir_context()
+input_shapes = (jnp.zeros((392, 518), dtype=jnp.float16),)
+jax_exported = export(jax.jit(jax_density))(*input_shapes)
+hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 
 import coremltools as ct
+from stablehlo_coreml.converter import convert
+from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 
-mlmodel = ct.convert([conc_density], convert_to="mlprogram")
-dist = local / "dist"
-dist.mkdir(parents=True, exist_ok=True)
-mlmodel.save(dist / "density.mlpackage")
+mil_program = convert(hlo_module, minimum_deployment_target=ct.target.iOS18)
+cml_model = ct.convert(
+    mil_program,
+    source="milinternal",
+    minimum_deployment_target=ct.target.iOS18,
+    pass_pipeline=DEFAULT_HLO_PIPELINE,
+)
+
