@@ -31,3 +31,7 @@ cml_model = ct.convert(
     pass_pipeline=DEFAULT_HLO_PIPELINE,
 )
 
+dist = local / "dist"
+dist.mkdir(parents=True, exist_ok=True)
+
+cml_model.save(str(dist / "centers.mlpackage"))
