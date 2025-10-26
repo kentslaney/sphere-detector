@@ -190,29 +190,8 @@ def read_balls_depth_records():
 
     return ds.map(_parse_depth_function)
 
-# >>> sum(1 for _ in read_depth_records())
+# >>> sum(1 for _ in read_balls_depth_records())
 # 10382
-
-def read_ballnt_depth_records():
-    ballnt_depth_feature_description = {
-        'file_name': tf.io.FixedLenFeature([], tf.string),
-        'image': tf.io.FixedLenFeature([], tf.string),
-        'depth': tf.io.FixedLenFeature([], tf.string),
-        'label': tf.io.FixedLenFeature([], tf.string),
-    }
-
-    ds = tf.data.TFRecordDataset(str(ballnt_depth_records))
-
-    def _parse_ballnt_depth_function(x):
-        res = tf.io.parse_single_example(x, ballnt_depth_feature_description)
-        return {
-            'file_name': res['file_name'],
-            'image': tf.io.parse_tensor(res['image'], out_type=tf.uint8),
-            'depth': tf.io.parse_tensor(res['depth'], out_type=tf.float32),
-            'label': tf.io.parse_tensor(res['label'], out_type=tf.int64),
-        }
-
-    return ds.map(_parse_ballnt_depth_function)
 
 def write_ballnt_depth_records():
     """
@@ -249,3 +228,24 @@ def write_ballnt_depth_records():
             }
             tf_example = tf.train.Example(features=tf.train.Features(feature=feature))
             writer.write(tf_example.SerializeToString())
+
+def read_ballnt_depth_records():
+    ballnt_depth_feature_description = {
+        'file_name': tf.io.FixedLenFeature([], tf.string),
+        'image': tf.io.FixedLenFeature([], tf.string),
+        'depth': tf.io.FixedLenFeature([], tf.string),
+        'label': tf.io.FixedLenFeature([], tf.string),
+    }
+
+    ds = tf.data.TFRecordDataset(str(ballnt_depth_records))
+
+    def _parse_ballnt_depth_function(x):
+        res = tf.io.parse_single_example(x, ballnt_depth_feature_description)
+        return {
+            'file_name': res['file_name'],
+            'image': tf.io.parse_tensor(res['image'], out_type=tf.uint8),
+            'depth': tf.io.parse_tensor(res['depth'], out_type=tf.float32),
+            'label': tf.io.parse_tensor(res['label'], out_type=tf.int64),
+        }
+
+    return ds.map(_parse_ballnt_depth_function)
