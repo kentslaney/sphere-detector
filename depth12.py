@@ -1,7 +1,11 @@
-import pathlib
+import pathlib, sys
 import tensorflow as tf
 
 local = pathlib.Path(__file__).parents[0]
+sys.path.insert(0, str(local))
+from static import Depth
+sys.path.pop(0)
+
 dsfs = local / "assets" / "datasets"
 balls_depth_records = dsfs / "depth_balls.tfrecord"
 ballnt_depth_records = dsfs / "depth_ballnt.tfrecord"
