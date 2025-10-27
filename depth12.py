@@ -1,5 +1,8 @@
 import pathlib, sys
 import tensorflow as tf
+import jax.numpy as jnp
+import numpy as np
+import matplotlib.pyplot as plt
 
 local = pathlib.Path(__file__).parents[0]
 sys.path.insert(0, str(local))
@@ -53,3 +56,114 @@ def read_ballnt_depth_records():
         }
 
     return ds.map(_parse_ballnt_depth_function)
+
+if __name__ == "__main__":
+    from scipy.stats import expon
+
+    cache_dir = local / "cache"
+    analysis_file = cache_dir / "density_analysis.npy"
+
+    if analysis_file.exists():
+        print(f"Loading cached results from {analysis_file}...")
+        results = np.load(analysis_file, allow_pickle=True).item()
+        bins = results['bins']
+        total_inside_hist = results['total_inside_hist']
+        total_outside_hist = results['total_outside_hist']
+        mean_inside = results['mean_inside']
+        mean_outside = results['mean_outside']
+    else:
+        print("No cached analysis file found. Processing datasets...")
+        ballnt_ds = read_ballnt_depth_records()
+        balls_ds = read_balls_depth_records()
+
+        # Define a common set of bins for all histograms
+        num_bins = 200
+        # Exponentially spaced bins from 0.01 to 100
+        bins = np.logspace(-2, 2, num_bins + 1)
+
+        total_inside_hist = np.zeros(num_bins, dtype=np.int64)
+        total_outside_hist = np.zeros(num_bins, dtype=np.int64)
+
+        inside_sum = 0.0
+        inside_count = 0
+        outside_sum = 0.0
+        outside_count = 0
+
+        # It's good practice to show progress for long-running tasks
+        from tqdm import tqdm
+        for example in tqdm(balls_ds, desc="Sampling 'inside' densities", total=10382):
+            depth_map = jnp.array(example['depth'].numpy())
+            bboxes = example['bbox'].numpy()
+
+            density_map = np.array(Depth(depth_map).density())
+
+            mask = np.zeros(density_map.shape, dtype=bool)
+            if bboxes.ndim == 2: # Ensure bboxes is not empty
+                for xmin, ymin, xmax, ymax in bboxes:
+                    if xmin != -1:  # Bounding boxes are padded with -1
+                        mask[ymin:ymax, xmin:xmax] = True
+
+            inside_values = density_map[mask]
+            inside_values = inside_values[inside_values > 0]  # Exclude zeros
+
+            # Accumulate sums and counts for mean calculation
+            inside_sum += np.sum(inside_values)
+            inside_count += len(inside_values)
+
+            total_inside_hist += np.histogram(inside_values, bins=bins)[0]
+
+        for example in tqdm(ballnt_ds, desc="Sampling 'outside' densities", total=10382):
+            depth_map = jnp.array(example['depth'].numpy())
+            density_map = np.array(Depth(depth_map).density())
+            outside_values = density_map[density_map > 0].flatten() # Exclude zeros
+
+            outside_sum += np.sum(outside_values)
+            outside_count += len(outside_values)
+
+            total_outside_hist += np.histogram(outside_values, bins=bins)[0]
+
+        # Calculate means
+        mean_inside = inside_sum / inside_count if inside_count > 0 else 0
+        mean_outside = outside_sum / outside_count if outside_count > 0 else 0
+
+        # Save the results to a .npy file
+        cache_dir.mkdir(exist_ok=True)
+        np.save(analysis_file, {
+            'bins': bins,
+
+            'total_outside_hist': total_outside_hist,
+            'mean_outside': mean_outside,
+            'outside_count': outside_count,
+
+            'total_inside_hist': total_inside_hist,
+            'mean_inside': mean_inside,
+            'inside_count': inside_count,
+        })
+
+    # Normalize histograms to get probability mass function
+    inside_pmf = total_inside_hist / (total_inside_hist.sum() * np.diff(bins))
+    outside_pmf = total_outside_hist / (total_outside_hist.sum() * np.diff(bins))
+
+    # Fit exponential distributions
+    # For an exponential distribution, the scale parameter (1/lambda) is the mean.
+    # The location parameter is assumed to be 0.
+    inside_fit = expon(scale=mean_inside)
+    outside_fit = expon(scale=mean_outside)
+
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+
+    plt.figure(figsize=(12, 6))
+    plt.bar(bin_centers, inside_pmf, width=np.diff(bins), alpha=0.6, label=f'Inside BBoxes (mean={mean_inside:.2f})')
+    plt.plot(bin_centers, inside_fit.pdf(bin_centers), 'b-', lw=2, label=f'Inside Fit (exp, scale={mean_inside:.2f})')
+
+    plt.gca().set_xscale('log')
+
+    plt.bar(bin_centers, outside_pmf, width=np.diff(bins), alpha=0.6, label=f'Outside BBoxes (mean={mean_outside:.2f})')
+    plt.plot(bin_centers, outside_fit.pdf(bin_centers), 'r-', lw=2, label=f'Outside Fit (exp, scale={mean_outside:.2f})')
+
+    plt.title('Aggregated Density Distribution and Exponential Fit')
+    plt.xlabel('Density Value')
+    plt.ylabel('Probability Density')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
