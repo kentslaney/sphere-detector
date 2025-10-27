@@ -153,15 +153,15 @@ if __name__ == "__main__":
     bin_centers = (bins[:-1] + bins[1:]) / 2
 
     plt.figure(figsize=(12, 6))
-    plt.bar(bin_centers, inside_pmf, width=np.diff(bins), alpha=0.6, label=f'Inside BBoxes (mean={mean_inside:.2f})')
-    plt.plot(bin_centers, inside_fit.pdf(bin_centers), 'b-', lw=2, label=f'Inside Fit (exp, scale={mean_inside:.2f})')
+    plt.bar(bin_centers, inside_pmf, width=np.diff(bins), alpha=0.6, label='Cropped detection examples')
+    plt.plot(bin_centers, inside_fit.pdf(bin_centers), 'b-', lw=2, label=f'postive exp fit (mean={mean_inside:.2f})')
 
     plt.gca().set_xscale('log')
 
-    plt.bar(bin_centers, outside_pmf, width=np.diff(bins), alpha=0.6, label=f'Outside BBoxes (mean={mean_outside:.2f})')
-    plt.plot(bin_centers, outside_fit.pdf(bin_centers), 'r-', lw=2, label=f'Outside Fit (exp, scale={mean_outside:.2f})')
+    plt.bar(bin_centers, outside_pmf, width=np.diff(bins), alpha=0.6, label='Control images from ImageNet-1k')
+    plt.plot(bin_centers, outside_fit.pdf(bin_centers), 'r-', lw=2, label=f'negative exp fit (mean={mean_outside:.2f})')
 
-    plt.title('Aggregated Density Distribution and Exponential Fit')
+    plt.title('Center Density Distribution and Exponential Fit')
     plt.xlabel('Density Value')
     plt.ylabel('Probability Density')
     plt.legend()
