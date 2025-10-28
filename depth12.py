@@ -71,6 +71,8 @@ if __name__ == "__main__":
         total_outside_hist = results['total_outside_hist']
         mean_inside = results['mean_inside']
         mean_outside = results['mean_outside']
+        inside_count = results['inside_count']
+        outside_count = results['outside_count']
     else:
         print("No cached analysis file found. Processing datasets...")
         ballnt_ds = read_ballnt_depth_records()
@@ -152,16 +154,32 @@ if __name__ == "__main__":
 
     bin_centers = (bins[:-1] + bins[1:]) / 2
 
+    ratio = inside_count / (inside_count + outside_count)
+
+    boundary = np.log(inside_count / mean_inside) - np.log(outside_count / mean_outside)
+    boundary /= (1 / mean_inside) - (1 / mean_outside)
+
     plt.figure(figsize=(12, 6))
-    plt.bar(bin_centers, inside_pmf, width=np.diff(bins), alpha=0.6, label='Cropped detection examples')
+    plt.bar(bin_centers, inside_pmf, width=np.diff(bins), alpha=0.6, label=f'Cropped detection examples ({ratio:.2%})')
     plt.plot(bin_centers, inside_fit.pdf(bin_centers), 'b-', lw=2, label=f'postive exp fit (mean={mean_inside:.2f})')
 
     plt.gca().set_xscale('log')
 
-    plt.bar(bin_centers, outside_pmf, width=np.diff(bins), alpha=0.6, label='Control images from ImageNet-1k')
+    plt.bar(bin_centers, outside_pmf, width=np.diff(bins), alpha=0.6, label=f'Control images from ImageNet-1k ({1 - ratio:.2%})')
     plt.plot(bin_centers, outside_fit.pdf(bin_centers), 'r-', lw=2, label=f'negative exp fit (mean={mean_outside:.2f})')
 
-    plt.title('Center Density Distribution and Exponential Fit')
+    plt.axvline(boundary, color='k', linestyle='--', label='Bayes classification threshold')
+
+    # Add a custom tick for the boundary
+    ax = plt.gca()
+    ax.set_xticks(list(ax.get_xticks()) + [boundary])
+    ax.text(boundary, -0.05, "≈ 3",
+            transform=ax.get_xaxis_transform(),
+            ha='center', va='top')
+
+    ax.set_xlim(1e-2, 1e2)
+
+    plt.title('Center (Non-Zero) Density Distribution and Exponential Fit')
     plt.xlabel('Density Value')
     plt.ylabel('Probability Density')
     plt.legend()
