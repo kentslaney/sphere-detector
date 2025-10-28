@@ -9,3 +9,5 @@ voxels*.npy
 /assets/downloads
 __pycache__
 /dist
+/.vscode/*
+!/.vscode/settings.json

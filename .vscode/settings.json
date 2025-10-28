@@ -1,0 +1,5 @@
+{
+    "python.analysis.extraPaths": [
+        "./assets/depth_anything_v2"
+    ]
+}

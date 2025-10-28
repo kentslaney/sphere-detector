@@ -16,3 +16,4 @@ jax[cuda13]
 transformers
 -e ./assets/stablehlo_coreml
 tqdm
+nltk
