@@ -96,10 +96,15 @@ def horizon(cylindrical):
     return jnp.linalg.slogdet(expanded_T @ expanded).logabsdet
 
 class Raster:
+    rng = [jax.random.key(0)]
+    key = None
     model = Da2('vits')
     metric = staticmethod(horizon)
     target = None
     f_35mm = None
+
+    def data(self, *a, **kw):
+        return Depth(*a, rng=self.key, **kw)
 
     @classmethod
     def file(cls, path, npy=None):
@@ -123,7 +128,7 @@ class Raster:
 
     @cached_property
     def depth(self):
-        return Depth(self.cache)
+        return self.data(self.cache, subkey)
 
     @property
     def shape(self):
@@ -144,15 +149,18 @@ class Raster:
         return resample.crop(jnp.concat((origin, origin + self.shape[::-1])))
 
     def __init__(self, im, cache=None):
+        self.rng[0], self.key = jax.random.split(self.rng[0])
         self.full = im
         if cache is not None:
             self.cache = cache
 
 @partial(
-        jax.tree_util.register_dataclass, data_fields=["depth"], meta_fields=[])
+        jax.tree_util.register_dataclass,
+        data_fields=["depth", "rng"], meta_fields=[])
 @dataclass
 class Depth(object):
     depth: any
+    rng: any
 
     @property
     def shape(self):
@@ -242,8 +250,12 @@ class Depth(object):
                     overlap[..., 0] * overlap[..., 1], mode="drop")
         return out
 
-    def bin(self, continuous, data, priority=None, topk=8):
+    # TODO: dtype
+    def bin(self, continuous, data, priority=None, topk=8, default=0):
         slots = data.shape[-1]
+        if priority is None:
+            self.rng, subkey = jax.random.split(self.rng)
+            priority = jax.random.uniform(subkey, shape=continuous.shape[:-1])
         assert continuous.ndim == priority.ndim + 1 == data.ndim
         assert continuous.shape[-1] == 2
         assert continuous.size // 2 == priority.size == data.size // slots
@@ -253,7 +265,8 @@ class Depth(object):
             data = data.reshape(-1, slots)
 
         sources = jnp.vstack((
-            jnp.zeros([slots + 1, continuous.shape[0] + 1]),
+            jnp.full([slots, continuous.shape[0] + 1], default),
+            jnp.zeros([1, continuous.shape[0] + 1]),
             -jnp.ones([1, continuous.shape[0] + 1])))
         floored = jnp.int32(jnp.floor(continuous))
 
@@ -272,7 +285,7 @@ class Depth(object):
         deref = sources[:slots, jnp.ravel(ref)].reshape(slots, -1, topk)
         deref = jnp.transpose(deref, axes=(1, 2, 0))
         deref, coord_flat = deref[1:], jnp.int32(coord_flat[1:])
-        out = jnp.zeros(tuple(self.shape.tolist()) + (topk, slots))
+        out = jnp.full(tuple(self.shape.tolist()) + (topk, slots), default)
         r, c = coord_flat // self.shape[1], coord_flat % self.shape[1]
         out = out.at[r, c].set(deref)
         return out
@@ -296,6 +309,22 @@ class Depth(object):
         copies = copies.at[:-1, :-1, 3, :, :].set(bins[1:, 1:])
         return copies.reshape(tuple(self.shape.tolist()) + (-1, slots))
 
+    def sources(self, topk=8):
+        return self.bin(
+            self.centers[self.inwards], self.coord[self.inwards],
+            topk=topk, default=-1)
+
+    def bounds(self, topk=4):
+        binner = partial(
+                self.bin, self.centers[self.inwards], self.coord[self.inwards],
+                topk=topk, default=-1)
+        return jnp.stack((
+            binner(-self.coord[self.inwards, 0]),
+            binner(-self.coord[self.inwards, 1]),
+            binner( self.coord[self.inwards, 0]),
+            binner( self.coord[self.inwards, 1])), 0)
+
+    # property getter has a side effect on rng key
     @cached_property
     def metered(self):
         return self.metric(self.binned())
@@ -320,9 +349,9 @@ class Perspective(Raster):
     @cached_property
     def depth(self):
         if self.f_35mm is None:
-            return Depth(self.cache)
+            return self.data(self.cache)
         # trends the right direction since depths are flipped
-        return Depth(self.cache / self.fov_sec)
+        return self.data(self.cache / self.fov_sec)
 
 class M2(Perspective):
     target = (392, 518)
@@ -331,12 +360,12 @@ class M2(Perspective):
 examples_dir = local / "assets" / "examples"
 cache_dir = local / "cache"
 
-if __name__ == "__main__":
-    im4 = M2.file(examples_dir / "IMG_0004.HEIC", cache_dir / "out4.npy")
-    im5 = M2.file(examples_dir / "IMG_0005.HEIC", cache_dir / "out5.npy")
-    im7 = M2.file(examples_dir / "IMG_0007.HEIC", cache_dir / "out7.npy")
-    im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
+im4 = M2.file(examples_dir / "IMG_0004.HEIC", cache_dir / "out4.npy")
+im5 = M2.file(examples_dir / "IMG_0005.HEIC", cache_dir / "out5.npy")
+im7 = M2.file(examples_dir / "IMG_0007.HEIC", cache_dir / "out7.npy")
+im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
 
+if __name__ == "__main__":
     import matplotlib.pyplot as plt
     plt.imshow(im4.depth.density())
     plt.show()
