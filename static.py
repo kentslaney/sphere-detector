@@ -233,16 +233,18 @@ class Depth(object):
     def w(self):
         return jnp.sqrt(self.w2)
 
-    def rasterize(self, continuous):
+    def rasterize(self, continuous, interpolate=True):
         assert continuous.shape[-1] == 2
         if continuous.ndim > 2:
             continuous = continuous.reshape(-1, 2)
         out = jnp.zeros(self.depth.shape, dtype=self.depth.dtype)
         floored = jnp.int32(jnp.floor(continuous))
         remainder = continuous - floored
-        for offset in jnp.array([[[0, 0]], [[0, 1]], [[1, 0]], [[1, 1]]]):
+        offsets = jnp.array([[[0, 0]], [[0, 1]], [[1, 0]], [[1, 1]]])
+        for offset in offsets[slice() if interpolate else slice(0, 1)]:
             filling = floored + offset
-            overlap = 1 - offset + (2 * offset - 1) * remainder
+            overlap = 1 - offset + (2 * offset - 1) * remainder if interpolate \
+                    else jnp.array([1, 1])
             valid = jnp.all(jnp.logical_and(
                     filling >= 0, filling < self.shape[None]), axis=1)
             filling = jnp.where(valid[:, None], filling, self.shape[None])
@@ -329,10 +331,10 @@ class Depth(object):
     def metered(self):
         return self.metric(self.binned())
 
-    @jax.jit
-    def density(self):
+    @partial(jax.jit, static_argnames=['interpolate'])
+    def density(self, interpolate=True):
         arr = jnp.where(self.inwards[..., None], self.centers, -2)
-        return self.rasterize(arr)
+        return self.rasterize(arr, interpolate)
 
 class Perspective(Raster):
     f_35mm = None
