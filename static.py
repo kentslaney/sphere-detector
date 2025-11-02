@@ -237,7 +237,8 @@ class Depth(object):
         assert continuous.shape[-1] == 2
         if continuous.ndim > 2:
             continuous = continuous.reshape(-1, 2)
-        out = jnp.zeros(self.depth.shape, dtype=self.depth.dtype)
+        out = jnp.zeros(self.depth.shape,
+                dtype=self.depth.dtype if interpolate else jnp.int32)
         floored = jnp.int32(jnp.floor(continuous))
         remainder = continuous - floored
         offsets = jnp.array([[[0, 0]], [[0, 1]], [[1, 0]], [[1, 1]]])
