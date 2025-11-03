@@ -128,7 +128,7 @@ class Raster:
 
     @cached_property
     def depth(self):
-        return self.data(self.cache, subkey)
+        return self.data(self.cache)
 
     @property
     def shape(self):
