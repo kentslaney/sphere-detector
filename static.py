@@ -242,7 +242,7 @@ class Depth(object):
         floored = jnp.int32(jnp.floor(continuous))
         remainder = continuous - floored
         offsets = jnp.array([[[0, 0]], [[0, 1]], [[1, 0]], [[1, 1]]])
-        for offset in offsets[slice() if interpolate else slice(0, 1)]:
+        for offset in offsets[slice(None) if interpolate else slice(0, 1)]:
             filling = floored + offset
             overlap = 1 - offset + (2 * offset - 1) * remainder if interpolate \
                     else jnp.array([1, 1])
