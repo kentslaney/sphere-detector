@@ -21,6 +21,6 @@ def sifting(im):
 
 if __name__ == "__main__":
     sifting(im4)
-    # sifting(im5)
-    # sifting(im7)
-    # sifting(im8)
+    sifting(im5)
+    sifting(im7)
+    sifting(im8)

@@ -316,7 +316,8 @@ class Bins(object):
     origin: any
     scale: any
 
-    alpha = 0.1
+    alpha = 0.2
+    beta = alpha ** 2
     win = ((2, 2), (2, 2))
     # TODO: check if additional offsets helps
     off = ((slice(0, -1), slice(0, -1)), (slice(1, None), slice(1, None)))
@@ -345,9 +346,9 @@ class Bins(object):
         return y * x
 
     def metric(self):
-        areas, coef = self.area(), self.alpha / self.counts.size
-        return jnp.log(areas + coef * jnp.sum(areas)) - jnp.log(
-                self.counts + coef * jnp.sum(self.counts))
+        areas, total = self.area(), self.counts.size
+        return jnp.log(areas + self.alpha / total * jnp.sum(areas)) - jnp.log(
+                self.counts + self.beta / total * jnp.sum(self.counts))
 
     def __getitem__(self, key):
         origin = jnp.array([i.start * self.scale for i in key]) + self.origin
