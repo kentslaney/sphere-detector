@@ -233,7 +233,7 @@ class Depth(object):
     def w(self):
         return jnp.sqrt(self.w2)
 
-    def rasterize(self, continuous, interpolate=True):
+    def rasterize(self, continuous, interpolate=False):
         assert continuous.shape[-1] == 2
         if continuous.ndim > 2:
             continuous = continuous.reshape(-1, 2)
@@ -252,6 +252,10 @@ class Depth(object):
             out = out.at[filling[..., 0], filling[..., 1]].add(
                     overlap[..., 0] * overlap[..., 1], mode="drop")
         return out
+
+    def density(self, interpolate=False):
+        arr = jnp.where(self.inwards[..., None], self.centers, -2)
+        return self.rasterize(arr, interpolate)
 
     # TODO: dtype
     def bin(self, continuous, data, priority=None, topk=8, default=0):
@@ -293,49 +297,74 @@ class Depth(object):
         out = out.at[r, c].set(deref)
         return out
 
-    def binned(self, topk=8):
-        dz = jnp.where(self.w != 0, 1 / self.w, 1)[..., None]
-        # gradient for the spheroid if it was a sphere
-        unsquished = jnp.concatenate((self.grad, dz), -1)
-        normed = unsquished / jnp.linalg.norm(
-                unsquished, axis=-1, keepdims=True)
-        return self.bin(
-            self.centers[self.inwards], normed[self.inwards], topk=topk)
+    # TODO: remove outliers
+    def bounds(self):
+        binner = lambda x, y: self.bin(
+                self.centers[self.inwards], self.coord[self.inwards, x:x + 1],
+                y * self.coord[self.inwards, x], topk=1, default=-1)
+        return jnp.squeeze(jnp.stack((
+            binner(0, -1),
+            binner(1, -1),
+            binner(0,  1),
+            binner(1,  1)), -3), (-2, -1))
 
-    def corners(self, topk=8):
-        bins = self.binned(topk)
-        slots = bins.shape[-1]
-        copies = jnp.zeros(tuple(self.shape.tolist()) + (4, topk, slots))
-        copies = copies.at[:, :, 0, :, :].set(bins[:, :])
-        copies = copies.at[:-1, :, 1, :, :].set(bins[1:, :])
-        copies = copies.at[:, :-1, 2, :, :].set(bins[:, 1:])
-        copies = copies.at[:-1, :-1, 3, :, :].set(bins[1:, 1:])
-        return copies.reshape(tuple(self.shape.tolist()) + (-1, slots))
+    def binned(self):
+        return Bins(self.bounds(), self.density())
 
-    def sources(self, topk=8):
-        return self.bin(
-            self.centers[self.inwards], self.coord[self.inwards],
-            topk=topk, default=-1)
+@partial(
+        jax.tree_util.register_dataclass,
+        data_fields=["bounds", "counts"], meta_fields=[])
+@dataclass
+class Bins(object):
+    bounds: any
+    counts: any
 
-    def bounds(self, topk=4):
-        binner = partial(
-                self.bin, self.centers[self.inwards], self.coord[self.inwards],
-                topk=topk, default=-1)
-        return jnp.stack((
-            binner(-self.coord[self.inwards, 0]),
-            binner(-self.coord[self.inwards, 1]),
-            binner( self.coord[self.inwards, 0]),
-            binner( self.coord[self.inwards, 1])), 0)
+    alpha = 0.1
+    win = ((2, 2), (2, 2))
+    off = ((slice(0, -1), slice(0, -1)), (slice(1, None), slice(1, None)))
 
-    # property getter has a side effect on rng key
-    @cached_property
-    def metered(self):
-        return self.metric(self.binned())
+    @staticmethod
+    def lower(a, b):
+        lo, hi = jax.lax.min(a, b), jax.lax.max(a, b)
+        return jnp.where(lo == -1, hi, lo)
 
-    @partial(jax.jit, static_argnames=['interpolate'])
-    def density(self, interpolate=True):
-        arr = jnp.where(self.inwards[..., None], self.centers, -2)
-        return self.rasterize(arr, interpolate)
+    # TODO: remove outliers
+    def merge(self):
+        f = jax.lax.reduce_window
+        bounds = jnp.stack((
+                f(self.bounds[..., 0], -1, self.lower, *self.win),
+                f(self.bounds[..., 1], -1, self.lower, *self.win),
+                f(self.bounds[..., 2], -1, jax.lax.max, *self.win),
+                f(self.bounds[..., 3], -1, jax.lax.max, *self.win)), -1)
+        counts = f(self.counts, 0, jax.lax.add, *self.win)
+        return __class__(bounds, counts)
+
+    def area(self):
+        hi = self.bounds[..., 2:] + (self.bounds[..., 2:] < -1)
+        y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
+        return y * x
+
+    def metric(self):
+        areas, coef = self.area(), self.alpha / self.counts.size
+        return jnp.log(areas + coef * jnp.sum(areas)) - jnp.log(
+                self.counts + coef * jnp.sum(self.counts))
+
+    def __getitem__(self, key):
+        return __class__(self.bounds[key], self.counts[key])
+
+    @jax.jit
+    def sifted(self):
+        idx, lo, val = -1, jnp.inf, None
+        for n, i in enumerate(self.off):
+            shift = self[i].merge()
+            loss = jnp.sum(shift.metric())
+            if val is None:
+                idx, lo, val = n, loss, shift
+            else:
+                idx, lo, val = jax.lax.cond(
+                        loss < lo,
+                        lambda: (n, loss, shift), lambda: (idx, lo, val))
+        return idx, val
 
 class Perspective(Raster):
     f_35mm = None
