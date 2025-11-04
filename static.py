@@ -309,18 +309,22 @@ class Depth(object):
             binner(1,  1)), -3), (-2, -1))
 
     def binned(self):
-        return Bins(self.bounds(), self.density())
+        return Bins(
+                self.bounds(), self.density(), jnp.array([0, 0]), jnp.array(1))
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["bounds", "counts"], meta_fields=[])
+        data_fields=["bounds", "counts", "origin", "scale"], meta_fields=[])
 @dataclass
 class Bins(object):
     bounds: any
     counts: any
+    origin: any
+    scale: any
 
     alpha = 0.1
     win = ((2, 2), (2, 2))
+    # TODO: check if additional offsets helps
     off = ((slice(0, -1), slice(0, -1)), (slice(1, None), slice(1, None)))
 
     @staticmethod
@@ -337,7 +341,7 @@ class Bins(object):
                 f(self.bounds[..., 2], -1, jax.lax.max, *self.win),
                 f(self.bounds[..., 3], -1, jax.lax.max, *self.win)), -1)
         counts = f(self.counts, 0, jax.lax.add, *self.win)
-        return __class__(bounds, counts)
+        return __class__(bounds, counts, self.origin, self.scale * 2)
 
     def area(self):
         hi = self.bounds[..., 2:] + (self.bounds[..., 2:] < -1)
@@ -350,7 +354,8 @@ class Bins(object):
                 self.counts + coef * jnp.sum(self.counts))
 
     def __getitem__(self, key):
-        return __class__(self.bounds[key], self.counts[key])
+        origin = jnp.array([i.start * self.scale for i in key]) + self.origin
+        return __class__(self.bounds[key], self.counts[key], origin, self.scale)
 
     @jax.jit
     def sifted(self):
