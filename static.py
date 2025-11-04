@@ -13,6 +13,8 @@ register_heif_opener()
 
 local = pathlib.Path(__file__).parents[0]
 
+# TODO: why is this casting to u8 at the end? it's quantized to f16.
+#       is the other version the same granularity but normalized?
 class Da2:
     size_mapping = { 'vits': 'Small', 'vitb': 'Base', 'vitl': 'Large' }
 
