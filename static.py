@@ -310,7 +310,8 @@ class Depth(object):
 
     def binned(self):
         return Bins(
-                self.bounds(), self.density(), jnp.array([0, 0]), jnp.array(1))
+                self.bounds(), self.density(),
+                jnp.array([0, 0]), jnp.array([1, 1]))
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -341,7 +342,9 @@ class Bins(object):
                 f(self.bounds[..., 2], -1, jax.lax.max, *self.win),
                 f(self.bounds[..., 3], -1, jax.lax.max, *self.win)), -1)
         counts = f(self.counts, 0, jax.lax.add, *self.win)
-        return __class__(bounds, counts, self.origin, self.scale * 2)
+        return __class__(
+                bounds, counts, self.origin,
+                self.scale * jnp.array(self.win[1]))
 
     def area(self):
         hi = self.bounds[..., 2:] + (self.bounds[..., 2:] < -1)
