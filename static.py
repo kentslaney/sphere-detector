@@ -319,8 +319,11 @@ class Bins(object):
     alpha = 0.2
     beta = alpha ** 2
     win = ((2, 2), (2, 2))
-    # TODO: check if additional offsets helps
-    off = ((slice(0, -1), slice(0, -1)), (slice(1, None), slice(1, None)))
+    off = (
+            (slice(0, -1), slice(0, -1)),
+            (slice(1, None), slice(0, -1)),
+            (slice(0, -1), slice(1, None)),
+            (slice(1, None), slice(1, None)))
 
     @staticmethod
     def lower(a, b):
