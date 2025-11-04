@@ -80,26 +80,10 @@ class Da2:
         import numpy as np
         return jnp.array(self.model.infer_image(np.array(im)))
 
-@jax.jit
-def horizon(cylindrical):
-    assert 1 < cylindrical.shape[-1] < 4
-    topk = cylindrical.shape[-2]
-    halved = jnp.atan2(cylindrical[..., 0], cylindrical[..., 1]) / 2
-    transformed = jnp.stack((jnp.cos(halved), jnp.sin(halved)), -1) * \
-            jnp.linalg.norm(cylindrical, axis=-1, keepdims=True)
-    spread = jnp.broadcast_to(
-            jnp.eye(topk)[(None,) * (cylindrical.ndim - 2)],
-            cylindrical.shape[:-2] + (topk, topk))
-    expanded_T = jnp.concatenate(
-            (transformed, cylindrical[..., 2:], spread), -1)
-    expanded = jnp.moveaxis(expanded_T, -2, -1)
-    return jnp.linalg.slogdet(expanded_T @ expanded).logabsdet
-
 class Raster:
     rng = [jax.random.key(0)]
     key = None
     model = Da2('vits')
-    metric = staticmethod(horizon)
     target = None
     f_35mm = None
 
@@ -257,7 +241,6 @@ class Depth(object):
         arr = jnp.where(self.inwards[..., None], self.centers, -2)
         return self.rasterize(arr, interpolate)
 
-    # TODO: dtype
     def bin(self, continuous, data, priority=None, topk=8, default=0):
         slots = data.shape[-1]
         if priority is None:
@@ -271,10 +254,13 @@ class Depth(object):
             priority = priority.reshape(-1)
             data = data.reshape(-1, slots)
 
+        mapping = { 'V': 'i', 'u': 'i', 'i': 'i', 'f': 'f', 'c': 'c' }
+        padded = jnp.dtype(
+                mapping[data.dtype.kind] + str(max(2, data.dtype.itemsize)))
         sources = jnp.vstack((
-            jnp.full([slots, continuous.shape[0] + 1], default),
-            jnp.zeros([1, continuous.shape[0] + 1]),
-            -jnp.ones([1, continuous.shape[0] + 1])))
+            jnp.full([slots, continuous.shape[0] + 1], default, dtype=padded),
+            jnp.zeros([1, continuous.shape[0] + 1], dtype=padded),
+            -jnp.ones([1, continuous.shape[0] + 1], dtype=padded)))
         floored = jnp.int32(jnp.floor(continuous))
 
         valid = jnp.all(jnp.logical_and(
@@ -292,7 +278,9 @@ class Depth(object):
         deref = sources[:slots, jnp.ravel(ref)].reshape(slots, -1, topk)
         deref = jnp.transpose(deref, axes=(1, 2, 0))
         deref, coord_flat = deref[1:], jnp.int32(coord_flat[1:])
-        out = jnp.full(tuple(self.shape.tolist()) + (topk, slots), default)
+        out = jnp.full(
+                tuple(self.shape.tolist()) + (topk, slots), default,
+                dtype=data.dtype)
         r, c = coord_flat // self.shape[1], coord_flat % self.shape[1]
         out = out.at[r, c].set(deref)
         return out
@@ -312,6 +300,11 @@ class Depth(object):
         return Bins(
                 self.bounds(), self.density(),
                 jnp.array([0, 0]), jnp.array([1, 1]))
+
+    def sources(self, topk=8):
+        return self.bin(
+            self.centers[self.inwards], self.coord[self.inwards],
+            topk=topk, default=-1)
 
 @partial(
         jax.tree_util.register_dataclass,
