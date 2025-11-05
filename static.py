@@ -371,6 +371,7 @@ class Bins(object):
         y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
         return y * x
 
+    # TODO: better metric
     def metric(self):
         areas, total = self.area(), self.counts.size
         return jnp.log(areas + self.alpha / total * jnp.sum(areas)) - jnp.log(
