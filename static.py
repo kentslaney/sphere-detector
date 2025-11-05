@@ -288,6 +288,7 @@ class Depth(object):
         return out
 
     # TODO: remove outliers
+    # increase topk, use xth percentile
     def bounds(self):
         binner = lambda x, y: self.bin(
                 self.centers[self.inwards], self.coord[self.inwards, x:x + 1],
@@ -333,6 +334,7 @@ class Bins(object):
         return jnp.where(lo == -1, hi, lo)
 
     # TODO: remove outliers
+    # if one's count is less than y% of the other, ignore it
     def merge(self):
         f = jax.lax.reduce_window
         bounds = jnp.stack((
