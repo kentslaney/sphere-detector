@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 def sifting(im):
     out = [im.depth.binned()] + [None] * 6
     for i in range(1, len(out)):
-        shift, out[i] = out[i - 1].sifted()
+        out[i] = out[i - 1].sifted()
 
     fig, (row0, row1) = plt.subplots(2, len(out))
     for ax0, ax1, bins in zip(row0, row1, out):

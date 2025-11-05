@@ -382,17 +382,16 @@ class Bins(object):
 
     @jax.jit
     def sifted(self):
-        idx, lo, val = -1, jnp.inf, None
-        for n, i in enumerate(self.off):
+        lo, val = None, None
+        for i in self.off:
             shift = self[i].merge()
             loss = jnp.sum(shift.metric())
             if val is None:
-                idx, lo, val = n, loss, shift
+                lo, val = loss, shift
             else:
-                idx, lo, val = jax.lax.cond(
-                        loss < lo,
-                        lambda: (n, loss, shift), lambda: (idx, lo, val))
-        return idx, val
+                lo, val = jax.lax.cond(
+                        loss < lo, lambda: (loss, shift), lambda: (lo, val))
+        return val
 
 class Perspective(Raster):
     f_35mm = None
