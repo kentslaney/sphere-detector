@@ -148,6 +148,8 @@ class Depth(object):
     depth: any
     rng: any
 
+    delta = 0.1 # boundary outlier proportion
+
     @property
     def shape(self):
         return jnp.array(self.depth.shape)
@@ -287,22 +289,21 @@ class Depth(object):
         out = out.at[r, c].set(deref)
         return out
 
-    # TODO: remove outliers
-    # increase topk, use xth percentile
-    def bounds(self):
+    def binned(self, max_outliers=3):
+        counts = self.density()
         binner = lambda x, y: self.bin(
                 self.centers[self.inwards], self.coord[self.inwards, x:x + 1],
-                y * self.coord[self.inwards, x], topk=1, default=-1)
-        return jnp.squeeze(jnp.stack((
+                y * self.coord[self.inwards, x], topk=max_outliers + 1,
+                default=-1)
+        bounds = jnp.squeeze(jnp.stack((
             binner(0, -1),
             binner(1, -1),
             binner(0,  1),
-            binner(1,  1)), -3), (-2, -1))
-
-    def binned(self):
-        return Bins(
-                self.bounds(), self.density(),
-                jnp.array([0, 0]), jnp.array([1, 1]))
+            binner(1,  1)), -3), -1)
+        idx = jnp.minimum(max_outliers, jnp.int32(counts * self.delta))
+        bounds = jnp.take_along_axis(
+                bounds, idx[..., None, None], axis=-1).squeeze(axis=-1)
+        return Bins(bounds, counts, jnp.array([0, 0]), jnp.array([1, 1]))
 
     def sources(self, topk=8):
         return self.bin(
@@ -319,8 +320,9 @@ class Bins(object):
     origin: any
     scale: any
 
-    alpha = 0.2
-    beta = alpha ** 2
+    alpha = 0.2 # area stabilization coefficient
+    beta = alpha ** 2 # count stabilization coefficient
+    gamma = 0.1 # negligible merge threshold
     win = ((2, 2), (2, 2))
     off = (
             (slice(0, -1), slice(0, -1)),
@@ -329,22 +331,39 @@ class Bins(object):
             (slice(1, None), slice(1, None)))
 
     @staticmethod
-    def lower(a, b):
-        lo, hi = jax.lax.min(a, b), jax.lax.max(a, b)
-        return jnp.where(lo == -1, hi, lo)
+    def upper(a, b):
+        merged = jax.lax.max(a['bound'], b['bound'])
+        small = jax.lax.min(a['count'], b['count'])
+        large = jax.lax.max(a['count'], b['count'])
+        overrun = jnp.where(a['count'] > b['count'], a['bound'], b['bound'])
+        bound = jnp.where(small <= __class__.gamma * large, overrun, merged)
+        return { 'bound': bound, 'count': a['count'] + b['count'] }
 
-    # TODO: remove outliers
-    # if one's count is less than y% of the other, ignore it
+    @staticmethod
+    def lower(a, b):
+        lo = jax.lax.min(a['bound'], b['bound'])
+        hi = jax.lax.max(a['bound'], b['bound'])
+        merged = jnp.where(lo == -1, hi, lo)
+
+        small = jax.lax.min(a['count'], b['count'])
+        large = jax.lax.max(a['count'], b['count'])
+        overrun = jnp.where(a['count'] < b['count'], a['bound'], b['bound'])
+        bound = jnp.where(small <= __class__.gamma * large, overrun, merged)
+        return { 'bound': bound, 'count': a['count'] + b['count'] }
+
     def merge(self):
         f = jax.lax.reduce_window
-        bounds = jnp.stack((
-                f(self.bounds[..., 0], -1, self.lower, *self.win),
-                f(self.bounds[..., 1], -1, self.lower, *self.win),
-                f(self.bounds[..., 2], -1, jax.lax.max, *self.win),
-                f(self.bounds[..., 3], -1, jax.lax.max, *self.win)), -1)
+        init = { 'bound': -1, 'count': 0 }
+        operand = lambda i: {
+                'bound': self.bounds[..., i], 'count': self.counts }
+        reduced = jnp.stack((
+                f(operand(0), init, self.lower, *self.win)['bound'],
+                f(operand(1), init, self.lower, *self.win)['bound'],
+                f(operand(2), init, self.upper, *self.win)['bound'],
+                f(operand(3), init, self.upper, *self.win)['bound']), -1)
         counts = f(self.counts, 0, jax.lax.add, *self.win)
         return __class__(
-                bounds, counts, self.origin,
+                reduced, counts, self.origin,
                 self.scale * jnp.array(self.win[1]))
 
     def area(self):
