@@ -241,9 +241,11 @@ class Depth(object):
                     overlap[..., 0] * overlap[..., 1], mode="drop")
         return out
 
+    def masked(self):
+        return jnp.where(self.inwards[..., None], self.centers, -2)
+
     def density(self, interpolate=False):
-        arr = jnp.where(self.inwards[..., None], self.centers, -2)
-        return self.rasterize(arr, interpolate)
+        return self.rasterize(self.masked(), interpolate)
 
     def bin(self, continuous, data, priority=None, topk=8, default=0):
         slots = data.shape[-1]
@@ -269,31 +271,33 @@ class Depth(object):
 
         valid = jnp.all(jnp.logical_and(
                 floored >= 0, floored < self.shape[None]), axis=1)
-        floored, priority, data = floored[valid], priority[valid], data[valid]
-        flat_index = floored[..., 0] * self.shape[1] + floored[..., 1]
-        sources = sources.at[:, :flat_index.shape[0]].set(
-                jnp.vstack((data.T, -priority[None], flat_index[None])))
+        flat_index = jnp.where(
+                valid, floored[..., 0] * self.shape[1] + floored[..., 1], -1)
+        sources = jnp.vstack((data.T, -priority[None], flat_index[None]))
 
         sources = sources[:, jnp.lexsort(sources)]
         coord_flat, offset, counts = jnp.unique(
-                sources[-1], return_index=True, return_counts=True)
+                sources[-1], return_index=True, return_counts=True,
+                size=priority.size + 1)
         keeping = jnp.arange(topk)[None] < counts[:, None]
         ref = (offset[:, None] + jnp.arange(topk)[None]) * keeping
         deref = sources[:slots, jnp.ravel(ref)].reshape(slots, -1, topk)
         deref = jnp.transpose(deref, axes=(1, 2, 0))
         deref, coord_flat = deref[1:], jnp.int32(coord_flat[1:])
         out = jnp.full(
-                tuple(self.shape.tolist()) + (topk, slots), default,
-                dtype=data.dtype)
-        r, c = coord_flat // self.shape[1], coord_flat % self.shape[1]
-        out = out.at[r, c].set(deref)
+                self.depth.shape + (topk, slots), default, dtype=data.dtype)
+        r, c = jnp.unstack(jnp.where(
+            counts[1:] == 0, self.shape[:, None], jnp.vstack(
+                (coord_flat // self.shape[1], coord_flat % self.shape[1]))))
+        out = out.at[r, c].set(deref, mode="drop")
         return out
 
+    @partial(jax.jit, static_argnames=['max_outliers'])
     def binned(self, max_outliers=3):
         counts = self.density()
         binner = lambda x, y: self.bin(
-                self.centers[self.inwards], self.coord[self.inwards, x:x + 1],
-                y * self.coord[self.inwards, x], topk=max_outliers + 1,
+                self.masked(), self.coord[..., x:x + 1],
+                y * self.coord[..., x], topk=max_outliers + 1,
                 default=-1)
         bounds = jnp.squeeze(jnp.stack((
             binner(0, -1),
@@ -304,11 +308,6 @@ class Depth(object):
         bounds = jnp.take_along_axis(
                 bounds, idx[..., None, None], axis=-1).squeeze(axis=-1)
         return Bins(bounds, counts, jnp.array([0, 0]), jnp.array([1, 1]))
-
-    def sources(self, topk=8):
-        return self.bin(
-            self.centers[self.inwards], self.coord[self.inwards],
-            topk=topk, default=-1)
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -382,6 +381,11 @@ class Bins(object):
 
     def combined(self):
         return jnp.ceil(self.beta * jnp.sqrt(self.counts.size))
+
+    def normalized(self):
+        metric = self.metric()
+        mean = self.combine(metric) / self.combined()
+        return metric / mean
 
     def __getitem__(self, key):
         origin = jnp.array([i.start * self.scale for i in key]) + self.origin

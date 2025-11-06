@@ -16,9 +16,7 @@ def sifting(im):
     fig, rows = plt.subplots(2, len(out))
     for ax0, ax1, bins in zip(*rows, out):
         ax0.imshow(bins.counts)
-        metric = bins.metric()
-        mean = bins.combine(metric) / bins.combined()
-        ax1.imshow(metric / mean)
+        ax1.imshow(bins.normalized())
     plt.show()
 
 if __name__ == "__main__":
