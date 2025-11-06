@@ -18,7 +18,7 @@ def sifting(im):
         ax0.imshow(bins.counts)
         metric = bins.metric()
         mean = bins.combine(metric) / bins.combined()
-        ax1.imshow(metric / mean / jnp.log(bins.counts.size))
+        ax1.imshow(metric / mean)
     plt.show()
 
 if __name__ == "__main__":

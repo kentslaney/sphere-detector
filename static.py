@@ -376,12 +376,12 @@ class Bins(object):
         return self.counts / (areas + self.alpha / total * jnp.sum(areas))
 
     def combine(self, metric):
-        cutoff = jnp.percentile(metric, 100 * (
-            1 - self.beta * metric.size ** -0.5))
-        return jnp.sum(jnp.where(metric > cutoff, metric, 0))
+        cutoff = jnp.quantile(
+                metric, 1 - self.beta * metric.size ** -0.5, method="higher")
+        return jnp.sum(jnp.where(metric >= cutoff, metric, 0))
 
     def combined(self):
-        return self.beta * jnp.sqrt(self.counts.size)
+        return jnp.ceil(self.beta * jnp.sqrt(self.counts.size))
 
     def __getitem__(self, key):
         origin = jnp.array([i.start * self.scale for i in key]) + self.origin
