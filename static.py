@@ -320,8 +320,8 @@ class Bins(object):
     origin: any
     scale: any
 
-    alpha = 0.2 # area stabilization coefficient
-    beta = alpha ** 2 # count stabilization coefficient
+    alpha = 0.1 # area stabilization coefficient
+    beta = 0.1 # proportion of pixels' metrics combined
     gamma = 0.1 # negligible merge threshold
     win = ((2, 2), (2, 2))
     off = (
@@ -371,11 +371,14 @@ class Bins(object):
         y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
         return y * x
 
-    # TODO: better metric
     def metric(self):
         areas, total = self.area(), self.counts.size
-        return jnp.log(areas + self.alpha / total * jnp.sum(areas)) - jnp.log(
-                self.counts + self.beta / total * jnp.sum(self.counts))
+        return self.counts / (areas + self.alpha / total * jnp.sum(areas))
+
+    def combine(self, metric):
+        cutoff = jnp.percentile(metric, 100 * (
+            1 - self.beta * metric.size ** -0.5))
+        return jnp.sum(jnp.where(metric > cutoff, metric, 0))
 
     def __getitem__(self, key):
         origin = jnp.array([i.start * self.scale for i in key]) + self.origin
@@ -383,15 +386,15 @@ class Bins(object):
 
     @jax.jit
     def sifted(self):
-        lo, val = None, None
+        hi, val = None, None
         for i in self.off:
             shift = self[i].merge()
-            loss = jnp.sum(shift.metric())
+            total = self.combine(shift.metric())
             if val is None:
-                lo, val = loss, shift
+                hi, val = total, shift
             else:
-                lo, val = jax.lax.cond(
-                        loss < lo, lambda: (loss, shift), lambda: (lo, val))
+                hi, val = jax.lax.cond(
+                        total > hi, lambda: (total, shift), lambda: (hi, val))
         return val
 
 class Perspective(Raster):
