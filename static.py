@@ -1,4 +1,4 @@
-import sys, pathlib
+import sys, pathlib, math
 from functools import cached_property, partial
 from dataclasses import dataclass
 
@@ -139,6 +139,16 @@ class Raster:
         self.full = im
         if cache is not None:
             self.cache = cache
+
+    def draw_candidates(self, ax):
+        import matplotlib.patches as patches
+        ax.imshow(self.cropped())
+        _, bboxes = self.depth.binned().nominate()
+        kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
+        for i in jnp.unstack(bboxes):
+            rect = patches.Rectangle(i[1::-1], *(i[:1:-1] - i[1::-1]), **kw)
+            ax.add_patch(rect)
+        return ax
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -404,6 +414,19 @@ class Bins(object):
                         total > hi, lambda: (total, shift), lambda: (hi, val))
         return val
 
+    @partial(jax.jit, static_argnames=['candidates', 'seives'])
+    def nominate(self, candidates=16, seives=None):
+        scaled, seives = self, seives or int(math.log2(self.counts.size) // 3)
+        values = jnp.ravel(scaled.normalized())
+        boundaries = scaled.bounds.reshape(-1, 4)
+        for _ in range(seives):
+            scaled = scaled.sifted()
+            values = jnp.concatenate((values, jnp.ravel(scaled.normalized())))
+            boundaries = jnp.concatenate(
+                    (boundaries, scaled.bounds.reshape(-1, 4)))
+        values, indices = jax.lax.top_k(values, candidates)
+        return values, boundaries[indices]
+
 class Perspective(Raster):
     f_35mm = None
 
@@ -437,5 +460,6 @@ im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    plt.imshow(im4.depth.density())
-    plt.show()
+    for im in [im4, im5, im7, im8]:
+        im.draw_candidates(plt.subplots()[1])
+        plt.show()
