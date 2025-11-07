@@ -329,14 +329,14 @@ class Bins(object):
     origin: any
     scale: any
 
-    alpha = 0.1 # area stabilization coefficient
+    alpha = 0.1 # density stabilization coefficient
     beta = 0.1 # proportion of pixels' metrics combined
     gamma = 0.1 # negligible merge threshold
     win = ((2, 2), (2, 2))
     off = (
             (slice(0, -1), slice(0, -1)),
-            (slice(1, None), slice(0, -1)),
-            (slice(0, -1), slice(1, None)),
+            # (slice(1, None), slice(0, -1)),
+            # (slice(0, -1), slice(1, None)),
             (slice(1, None), slice(1, None)))
 
     @staticmethod
@@ -382,7 +382,8 @@ class Bins(object):
 
     def metric(self):
         areas, total = self.area(), self.counts.size
-        return self.counts / (areas + self.alpha / total * jnp.sum(areas))
+        return (self.counts + self.alpha * jnp.sum(self.counts) / total) / (
+                areas + self.alpha * total * self.scale[0] * self.scale[1])
 
     def combine(self, metric):
         cutoff = jnp.quantile(
@@ -452,14 +453,3 @@ class M2(Perspective):
 
 examples_dir = local / "assets" / "examples"
 cache_dir = local / "cache"
-
-im4 = M2.file(examples_dir / "IMG_0004.HEIC", cache_dir / "out4.npy")
-im5 = M2.file(examples_dir / "IMG_0005.HEIC", cache_dir / "out5.npy")
-im7 = M2.file(examples_dir / "IMG_0007.HEIC", cache_dir / "out7.npy")
-im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    for im in [im4, im5, im7, im8]:
-        im.draw_candidates(plt.subplots()[1])
-        plt.show()
