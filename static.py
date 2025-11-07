@@ -94,15 +94,15 @@ class Raster:
 
     @classmethod
     def file(cls, path, npy=None):
-        cache = None
+        im, cache = Image.open(path), None
         if npy is not None:
             npy = pathlib.Path(npy)
             if npy.exists():
                 cache = jnp.load(npy)
-                if cls.target is not None and jnp.all(
-                        cache.shape != cls.target):
+                if jnp.any(cache.shape != im.size[::-1]) if cls.target is None \
+                        else jnp.any(cache.shape != cls.target):
                     cache = None
-        obj = cls(Image.open(path), cache)
+        obj = cls(im, cache)
         if npy is not None:
             npy.parents[0].mkdir(parents=True, exist_ok=True)
             jnp.save(npy, obj.cache)
