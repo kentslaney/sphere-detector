@@ -82,6 +82,21 @@ class Da2:
         import numpy as np
         return jnp.array(self.model.infer_image(np.array(im)))
 
+@jax.jit
+def horizon(cylindrical):
+    assert 1 < cylindrical.shape[-1] < 4
+    topk = cylindrical.shape[-2]
+    halved = jnp.atan2(cylindrical[..., 0], cylindrical[..., 1]) / 2
+    transformed = jnp.stack((jnp.cos(halved), jnp.sin(halved)), -1) * \
+            jnp.linalg.norm(cylindrical, axis=-1, keepdims=True)
+    spread = jnp.broadcast_to(
+            jnp.eye(topk)[(None,) * (cylindrical.ndim - 2)],
+            cylindrical.shape[:-2] + (topk, topk))
+    expanded_T = jnp.concatenate(
+            (transformed, cylindrical[..., 2:], spread), -1)
+    expanded = jnp.moveaxis(expanded_T, -2, -1)
+    return jnp.linalg.slogdet(expanded_T @ expanded).logabsdet
+
 class Raster:
     rng = [jax.random.key(0)]
     key = None
