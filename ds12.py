@@ -155,16 +155,19 @@ def write_balls_depth_records():
 
     ds_with_depth = ds.map(_process_with_depth)
 
+    f, b, s = tf.train.Feature, tf.train.BytesList, tf.io.serialize_tensor
     with tf.io.TFRecordWriter(str(balls_depth_records)) as writer:
-        for example in ds_with_depth:
+        for ex in ds_with_depth:
             feature = {
-                'file_name': tf.train.Feature(bytes_list=tf.train.BytesList(value=[example['file_name'].numpy()])),
-                'image': tf.train.Feature(bytes_list=tf.train.BytesList(value=[tf.io.serialize_tensor(example['image']).numpy()])),
-                'depth': tf.train.Feature(bytes_list=tf.train.BytesList(value=[tf.io.serialize_tensor(example['depth']).numpy()])),
-                'label': tf.train.Feature(bytes_list=tf.train.BytesList(value=[tf.io.serialize_tensor(example['label']).numpy()])),
-                'bbox': tf.train.Feature(int64_list=tf.train.Int64List(value=tf.reshape(example['bbox'], [-1]).numpy()))
+                'file_name': f(bytes_list=b(value=[ex['file_name'].numpy()])),
+                'image': f(bytes_list=b(value=[s(ex['image']).numpy()])),
+                'depth': f(bytes_list=b(value=[s(ex['depth']).numpy()])),
+                'label': f(bytes_list=b(value=[s(ex['label']).numpy()])),
+                'bbox': f(int64_list=tf.train.Int64List(
+                        value=tf.reshape(ex['bbox'], [-1]).numpy()))
             }
-            tf_example = tf.train.Example(features=tf.train.Features(feature=feature))
+            tf_example = tf.train.Example(features=tf.train.Features(
+                    feature=feature))
             writer.write(tf_example.SerializeToString())
 
 def read_balls_depth_records():
@@ -216,17 +219,19 @@ def write_ballnt_depth_records():
 
     ds_with_depth = ds.map(_process_with_depth)
 
+    f, b, s = tf.train.Feature, tf.train.BytesList, tf.io.serialize_tensor
     with tf.io.TFRecordWriter(str(ballnt_depth_records)) as writer:
-        for i, example in enumerate(ds_with_depth):
+        for i, ex in enumerate(ds_with_depth):
             if (i + 1) % 1000 == 0:
                 print(f"Writing record {i + 1}/10382 for ballnt_depth.tfrecord")
             feature = {
-                'file_name': tf.train.Feature(bytes_list=tf.train.BytesList(value=[example['file_name'].numpy()])),
-                'image': tf.train.Feature(bytes_list=tf.train.BytesList(value=[tf.io.serialize_tensor(example['image']).numpy()])),
-                'depth': tf.train.Feature(bytes_list=tf.train.BytesList(value=[tf.io.serialize_tensor(example['depth']).numpy()])),
-                'label': tf.train.Feature(bytes_list=tf.train.BytesList(value=[tf.io.serialize_tensor(example['label']).numpy()])),
+                'file_name': f(bytes_list=b(value=[ex['file_name'].numpy()])),
+                'image': f(bytes_list=b(value=[s(ex['image']).numpy()])),
+                'depth': f(bytes_list=b(value=[s(ex['depth']).numpy()])),
+                'label': f(bytes_list=b(value=[s(ex['label']).numpy()])),
             }
-            tf_example = tf.train.Example(features=tf.train.Features(feature=feature))
+            tf_example = tf.train.Example(features=tf.train.Features(
+                    feature=feature))
             writer.write(tf_example.SerializeToString())
 
 def read_ballnt_depth_records():
