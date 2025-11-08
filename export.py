@@ -6,21 +6,25 @@ sys.path.pop(0)
 
 target = M2.target
 
+import jax
+import jax.numpy as jnp
+
+@jax.jit
 def jax_density(x):
     x = x.reshape(target)
-    return Depth(x).density()
+    return M2(jnp.array([]), x).depth.binned().nominate()
 
-import jax
 from jax._src.lib.mlir import ir
 from jax._src.interpreters import mlir as jax_mlir
 from jax.export import export
 
-import jax.numpy as jnp
-
 context = jax_mlir.make_ir_context()
 input_shapes = (jnp.zeros((1, 1) + target, dtype=jnp.float16),)
-jax_exported = export(jax.jit(jax_density))(*input_shapes)
+jax_exported = export(jax_density)(*input_shapes)
 hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
+
+# print(jax_density.lower(*input_shapes).as_text())
+# exit(0)
 
 import coremltools as ct
 from stablehlo_coreml.converter import convert
@@ -32,7 +36,9 @@ cml_model = ct.convert(
     source="milinternal",
     minimum_deployment_target=ct.target.iOS18,
     pass_pipeline=DEFAULT_HLO_PIPELINE,
-    inputs=[ct.ImageType("_arg0", shape=target, color_layout=ct.colorlayout.GRAYSCALE_FLOAT16, channel_first=True)],
+    inputs=[ct.ImageType(
+        "_arg0", shape=target, color_layout=ct.colorlayout.GRAYSCALE_FLOAT16,
+        channel_first=True)],
 )
 
 dist = local / "dist"

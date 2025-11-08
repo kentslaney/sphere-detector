@@ -132,12 +132,16 @@ class Raster:
         return self.data(self.cache)
 
     @property
+    def spec(self):
+        return self.full.size if self.target is None else self.target
+
+    @property
     def shape(self):
-        return jnp.array(self.full.size if self.target is None else self.target)
+        return jnp.array(self.spec)
 
     @property
     def coord(self):
-        x, y = jnp.meshgrid(*map(jnp.arange, self.shape[::-1]))
+        x, y = jnp.meshgrid(*map(jnp.arange, self.spec[::-1]))
         return jnp.stack((y, x), -1)
 
     def cropped(self):
@@ -257,13 +261,13 @@ class Depth(object):
         offsets = jnp.array([[[0, 0]], [[0, 1]], [[1, 0]], [[1, 1]]])
         for offset in offsets[slice(None) if interpolate else slice(0, 1)]:
             filling = floored + offset
-            overlap = 1 - offset + (2 * offset - 1) * remainder if interpolate \
-                    else jnp.array([1, 1])
+            overlap = 1 - offset + (2 * offset - 1) * remainder
             valid = jnp.all(jnp.logical_and(
                     filling >= 0, filling < self.shape[None]), axis=1)
             filling = jnp.where(valid[:, None], filling, self.shape[None])
             out = out.at[filling[..., 0], filling[..., 1]].add(
-                    overlap[..., 0] * overlap[..., 1], mode="drop")
+                    overlap[..., 0] * overlap[..., 1] if interpolate else 1,
+                    mode="drop")
         return out
 
     def masked(self):
@@ -297,7 +301,8 @@ class Depth(object):
         valid = jnp.all(jnp.logical_and(
                 floored >= 0, floored < self.shape[None]), axis=1)
         flat_index = jnp.where(
-                valid, floored[..., 0] * self.shape[1] + floored[..., 1], -1)
+                valid, floored[..., 0] * self.depth.shape[1] + floored[..., 1],
+                -1)
         sources = jnp.vstack((data.T, -priority[None], flat_index[None]))
 
         sources = sources[:, jnp.lexsort(sources)]
