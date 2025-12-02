@@ -26,16 +26,21 @@ hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 # print(jax_density.lower(*input_shapes).as_text())
 # exit(0)
 
+# TODO: patch via forked submodule to https://github.com/apple/coremltools/pull/2626
 import coremltools as ct
 from stablehlo_coreml.converter import convert
 from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 
 mil_program = convert(hlo_module, minimum_deployment_target=ct.target.iOS18)
+
+pipeline = DEFAULT_HLO_PIPELINE
+pipeline.remove_passes(['common::add_int16_cast'])
+
 cml_model = ct.convert(
     mil_program,
     source="milinternal",
     minimum_deployment_target=ct.target.iOS18,
-    pass_pipeline=DEFAULT_HLO_PIPELINE,
+    pass_pipeline=pipeline,
     inputs=[ct.ImageType(
         "_arg0", shape=target, color_layout=ct.colorlayout.GRAYSCALE_FLOAT16,
         channel_first=True)],

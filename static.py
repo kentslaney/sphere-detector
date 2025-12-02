@@ -13,6 +13,7 @@ register_heif_opener()
 
 local = pathlib.Path(__file__).parents[0]
 
+# TODO: switch to Depth Anything 3
 # TODO: why is this casting to u8 at the end? it's quantized to f16.
 #       is the other version the same granularity but normalized?
 class Da2:
@@ -305,6 +306,7 @@ class Depth(object):
                 -1)
         sources = jnp.vstack((data.T, -priority[None], flat_index[None]))
 
+        # TODO: jax.lax.sort(num_keys)
         sources = sources[:, jnp.lexsort(sources)]
         coord_flat, offset, counts = jnp.unique(
                 sources[-1], return_index=True, return_counts=True,
@@ -322,7 +324,7 @@ class Depth(object):
         out = out.at[r, c].set(deref, mode="drop")
         return out
 
-    @partial(jax.jit, static_argnames=['max_outliers'])
+    @jax.jit(static_argnames=['max_outliers'])
     def binned(self, max_outliers=3):
         counts = self.density()
         binner = lambda x, y: self.bin(
@@ -338,6 +340,16 @@ class Depth(object):
         bounds = jnp.take_along_axis(
                 bounds, idx[..., None, None], axis=-1).squeeze(axis=-1)
         return Bins(bounds, counts, jnp.array([0, 0]), jnp.array([1, 1]))
+
+    @jax.jit(static_argnames=['topk'])
+    def radii(self, topk=8):
+        dz = jnp.where(self.w != 0, 1 / self.w, 1)[..., None]
+        # gradient for the spheroid if it was a sphere
+        unsquished = jnp.concatenate((self.grad, dz), -1)
+        # normed = unsquished / jnp.linalg.norm(
+        #         unsquished, axis=-1, keepdims=True)
+        # return self.bin(self.masked(), normed, topk=topk)
+        return self.bin(self.masked(), unsquished, topk=topk)
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -419,7 +431,7 @@ class Bins(object):
         return metric / mean
 
     def __getitem__(self, key):
-        origin = jnp.array([i.start * self.scale for i in key]) + self.origin
+        origin = jnp.array([i.start for i in key]) * self.scale + self.origin
         return __class__(self.bounds[key], self.counts[key], origin, self.scale)
 
     @jax.jit
@@ -435,7 +447,7 @@ class Bins(object):
                         total > hi, lambda: (total, shift), lambda: (hi, val))
         return val
 
-    @partial(jax.jit, static_argnames=['candidates', 'seives'])
+    @jax.jit(static_argnames=['candidates', 'seives'])
     def nominate(self, candidates=16, seives=None):
         scaled, seives = self, seives or int(math.log2(self.counts.size) // 3)
         values = jnp.ravel(scaled.normalized())
@@ -447,6 +459,17 @@ class Bins(object):
                     (boundaries, scaled.bounds.reshape(-1, 4)))
         values, indices = jax.lax.top_k(values, candidates)
         return values, boundaries[indices]
+
+    @property
+    def coord(self):
+        x, y = jnp.meshgrid(*map(jnp.arange, self.counts.shape[::-1]))
+        return jnp.stack((y, x), -1)
+
+    def sources(self): # inclusive ranges
+        broadcastable = self.scale[None, None]
+        top_left = self.origin[None, None] + broadcastable * self.coord
+        bottom_right = top_left + broadcastable - 1
+        return jnp.concatenate((top_left, bottom_right), axis=-1)
 
 class Perspective(Raster):
     f_35mm = None
