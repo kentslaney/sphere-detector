@@ -319,7 +319,7 @@ class Depth(object):
         counts = self.density()
         cache = Casts2d(self.depth.shape, self.masked, topk=max_outliers + 1)
         binner = lambda x, y: cache.ordered(
-                self.coord[..., x:x + 1], y * self.coord[..., x], default=-1)
+                self.coord[..., x:x + 1], y * jnp.int16(self.coord[..., x]), -1)
         bounds = jnp.squeeze(jnp.stack((
             binner(0, -1),
             binner(1, -1),
