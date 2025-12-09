@@ -271,11 +271,12 @@ class Depth(object):
                     mode="drop")
         return out
 
+    @cached_property
     def masked(self):
         return jnp.where(self.inwards[..., None], self.centers, -2)
 
     def density(self, interpolate=False):
-        return self.rasterize(self.masked(), interpolate)
+        return self.rasterize(self.masked, interpolate)
 
     def bin(self, continuous, data, priority=None, topk=8, default=0):
         slots = data.shape[-1]
@@ -302,7 +303,7 @@ class Depth(object):
                 dimension=0, num_keys=2)
         coord_flat, offset, counts = jnp.unique(
                 flat_index, return_index=True, return_counts=True,
-                size=priority.size + 1)
+                size=priority.size + 1, fill_value=-1)
         keeping = jnp.arange(topk)[None] < counts[:, None]
         ref = (offset[:, None] + jnp.arange(topk)[None]) * keeping
         deref = data[jnp.ravel(ref)].reshape(-1, topk, slots)
@@ -316,11 +317,9 @@ class Depth(object):
     @jax.jit(static_argnames=['max_outliers'])
     def binned(self, max_outliers=3):
         counts = self.density()
-        binner = lambda x, y: self.bin(
-                self.masked(), self.coord[..., x:x + 1],
-                y * self.coord[..., x], topk=max_outliers + 1,
-                default=-1)
-        # TODO: the results of jnp.unique can be reused
+        cache = Casts2d(self.depth.shape, self.masked, topk=max_outliers + 1)
+        binner = lambda x, y: cache.ordered(
+                self.coord[..., x:x + 1], y * self.coord[..., x], default=-1)
         bounds = jnp.squeeze(jnp.stack((
             binner(0, -1),
             binner(1, -1),
@@ -338,8 +337,52 @@ class Depth(object):
         unsquished = jnp.concatenate((self.grad, dz), -1)
         # normed = unsquished / jnp.linalg.norm(
         #         unsquished, axis=-1, keepdims=True)
-        # return self.bin(self.masked(), normed, topk=topk)
-        return self.bin(self.masked(), unsquished, topk=topk)
+        # return self.bin(self.masked, normed, topk=topk)
+        return self.bin(self.masked, unsquished, topk=topk)
+
+@partial(
+        jax.tree_util.register_dataclass,
+        data_fields=["scatter", "sorted", "gather"],
+        meta_fields=["shape", "topk"])
+@dataclass
+class Casts2d(object):
+    shape: any
+    topk: any
+    scatter: any
+    sorted: any
+    gather: any
+
+    def __init__(self, shape, continuous, topk=8):
+        self.shape, self.topk = shape, topk
+        if continuous.ndim > 2:
+            continuous = continuous.reshape(-1, 2)
+        floored = jnp.int32(jnp.floor(continuous))
+        valid = jnp.all(jnp.logical_and(
+                floored >= 0, floored < jnp.array(shape)[None]), axis=1)
+        self.scatter = jnp.where(
+                valid, floored[..., 0] * shape[1] + floored[..., 1], -1)
+        self.sorted, offset, counts = jnp.unique(
+                jnp.sort(self.scatter), return_index=True, return_counts=True,
+                size=continuous.shape[0] + 1, fill_value=-1)
+        keeping = jnp.arange(topk)[None] < counts[:, None]
+        ref = (offset[:, None] + jnp.arange(topk)[None]) * keeping
+        self.gather = jnp.ravel(ref)
+
+    def ordered(self, data, priority, default=0):
+        slots = data.shape[-1]
+        priority = priority.reshape(-1)
+        data = data.reshape(-1, slots)
+
+        data = jax.lax.sort(
+                (self.scatter[:, None], -priority[:, None], data),
+                dimension=0, num_keys=2)[-1]
+        deref = data[jnp.ravel(self.gather)].reshape(-1, self.topk, slots)
+        deref, coord_flat = deref[1:], jnp.int32(self.sorted[1:])
+
+        out = jnp.full(
+                self.shape + (self.topk, slots), default, dtype=data.dtype)
+        r, c = coord_flat // self.shape[1], coord_flat % self.shape[1]
+        return out.at[r, c].set(deref, mode="drop")
 
 @partial(
         jax.tree_util.register_dataclass,
