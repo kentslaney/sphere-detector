@@ -184,7 +184,7 @@ class Depth(object):
     def shape(self):
         return jnp.array(self.depth.shape)
 
-    @property
+    @cached_property
     def coord(self):
         x, y = jnp.meshgrid(*map(jnp.arange, self.depth.shape[::-1]))
         return jnp.stack((y, x), -1)
@@ -290,37 +290,26 @@ class Depth(object):
             priority = priority.reshape(-1)
             data = data.reshape(-1, slots)
 
-        mapping = { 'V': 'i', 'u': 'i', 'i': 'i', 'f': 'f', 'c': 'c' }
-        padded = jnp.dtype(
-                mapping[data.dtype.kind] + str(max(2, data.dtype.itemsize)))
-        sources = jnp.vstack((
-            jnp.full([slots, continuous.shape[0] + 1], default, dtype=padded),
-            jnp.zeros([1, continuous.shape[0] + 1], dtype=padded),
-            -jnp.ones([1, continuous.shape[0] + 1], dtype=padded)))
         floored = jnp.int32(jnp.floor(continuous))
-
         valid = jnp.all(jnp.logical_and(
                 floored >= 0, floored < self.shape[None]), axis=1)
         flat_index = jnp.where(
                 valid, floored[..., 0] * self.depth.shape[1] + floored[..., 1],
                 -1)
-        sources = jnp.vstack((data.T, -priority[None], flat_index[None]))
 
-        # TODO: jax.lax.sort(num_keys)
-        sources = sources[:, jnp.lexsort(sources)]
+        flat_index, _, data = jax.lax.sort(
+                (flat_index[None], -priority[None], data.T), num_keys=2)
         coord_flat, offset, counts = jnp.unique(
-                sources[-1], return_index=True, return_counts=True,
+                flat_index, return_index=True, return_counts=True,
                 size=priority.size + 1)
         keeping = jnp.arange(topk)[None] < counts[:, None]
         ref = (offset[:, None] + jnp.arange(topk)[None]) * keeping
-        deref = sources[:slots, jnp.ravel(ref)].reshape(slots, -1, topk)
+        deref = data[:, jnp.ravel(ref)].reshape(slots, -1, topk)
         deref = jnp.transpose(deref, axes=(1, 2, 0))
         deref, coord_flat = deref[1:], jnp.int32(coord_flat[1:])
         out = jnp.full(
                 self.depth.shape + (topk, slots), default, dtype=data.dtype)
-        r, c = jnp.unstack(jnp.where(
-            counts[1:] == 0, self.shape[:, None], jnp.vstack(
-                (coord_flat // self.shape[1], coord_flat % self.shape[1]))))
+        r, c = coord_flat // self.shape[1], coord_flat % self.shape[1]
         out = out.at[r, c].set(deref, mode="drop")
         return out
 
@@ -331,6 +320,7 @@ class Depth(object):
                 self.masked(), self.coord[..., x:x + 1],
                 y * self.coord[..., x], topk=max_outliers + 1,
                 default=-1)
+        # TODO: the results of jnp.unique can be reused
         bounds = jnp.squeeze(jnp.stack((
             binner(0, -1),
             binner(1, -1),

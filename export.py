@@ -12,7 +12,8 @@ import jax.numpy as jnp
 @jax.jit
 def jax_density(x):
     x = x.reshape(target)
-    return M2(jnp.array([]), x).depth.binned().nominate()
+    # return M2(jnp.array([]), x).depth.binned().nominate()
+    return M2(jnp.array([]), x).depth.binned().bounds
 
 from jax._src.lib.mlir import ir
 from jax._src.interpreters import mlir as jax_mlir
@@ -40,6 +41,7 @@ cml_model = ct.convert(
     mil_program,
     source="milinternal",
     minimum_deployment_target=ct.target.iOS18,
+    compute_units=ct.ComputeUnit.ALL,
     pass_pipeline=pipeline,
     inputs=[ct.ImageType(
         "_arg0", shape=target, color_layout=ct.colorlayout.GRAYSCALE_FLOAT16,
