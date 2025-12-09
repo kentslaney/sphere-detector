@@ -376,7 +376,7 @@ class Casts2d(object):
         data = jax.lax.sort(
                 (self.scatter[:, None], -priority[:, None], data),
                 dimension=0, num_keys=2)[-1]
-        deref = data[jnp.ravel(self.gather)].reshape(-1, self.topk, slots)
+        deref = data[self.gather].reshape(-1, self.topk, slots)
         deref, coord_flat = deref[1:], jnp.int32(self.sorted[1:])
 
         out = jnp.full(
