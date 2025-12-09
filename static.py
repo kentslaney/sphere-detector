@@ -319,12 +319,12 @@ class Depth(object):
         counts = self.density()
         cache = Casts2d(self.depth.shape, self.masked, topk=max_outliers + 1)
         binner = lambda x, y: cache.ordered(
-                self.coord[..., x:x + 1], y * jnp.int16(self.coord[..., x]), -1)
+                self.coord[..., x:x + 1], jnp.int16(y * self.coord[..., x]), -1)
         bounds = jnp.squeeze(jnp.stack((
-            binner(0, -1),
-            binner(1, -1),
             binner(0,  1),
-            binner(1,  1)), -3), -1)
+            binner(1,  1),
+            binner(0, -1),
+            binner(1, -1)), -3), -1)
         idx = jnp.minimum(max_outliers, jnp.int32(counts * self.delta))
         bounds = jnp.take_along_axis(
                 bounds, idx[..., None, None], axis=-1).squeeze(axis=-1)
@@ -368,13 +368,13 @@ class Casts2d(object):
         ref = (offset[:, None] + jnp.arange(topk)[None]) * keeping
         self.gather = jnp.ravel(ref)
 
-    def ordered(self, data, priority, default=0):
+    def ordered(self, data, loss, default=0):
         slots = data.shape[-1]
-        priority = priority.reshape(-1)
+        loss = loss.reshape(-1)
         data = data.reshape(-1, slots)
 
         data = jax.lax.sort(
-                (self.scatter[:, None], -priority[:, None], data),
+                (self.scatter[:, None], loss[:, None], data),
                 dimension=0, num_keys=2)[-1]
         deref = data[self.gather].reshape(-1, self.topk, slots)
         deref, coord_flat = deref[1:], jnp.int32(self.sorted[1:])
