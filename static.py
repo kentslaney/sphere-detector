@@ -298,14 +298,14 @@ class Depth(object):
                 -1)
 
         flat_index, _, data = jax.lax.sort(
-                (flat_index[None], -priority[None], data.T), num_keys=2)
+                (flat_index[:, None], -priority[:, None], data),
+                dimension=0, num_keys=2)
         coord_flat, offset, counts = jnp.unique(
                 flat_index, return_index=True, return_counts=True,
                 size=priority.size + 1)
         keeping = jnp.arange(topk)[None] < counts[:, None]
         ref = (offset[:, None] + jnp.arange(topk)[None]) * keeping
-        deref = data[:, jnp.ravel(ref)].reshape(slots, -1, topk)
-        deref = jnp.transpose(deref, axes=(1, 2, 0))
+        deref = data[jnp.ravel(ref)].reshape(-1, topk, slots)
         deref, coord_flat = deref[1:], jnp.int32(coord_flat[1:])
         out = jnp.full(
                 self.depth.shape + (topk, slots), default, dtype=data.dtype)
