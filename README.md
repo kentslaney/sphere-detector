@@ -1,6 +1,8 @@
 # Spheroid depth test
 ```bash
 sh assets/coremltools/scripts/build.sh --python=3.12
+python -m venv env
+env/bin/pip install -r requirements.txt
 ```
 ## ImageNet-1K (130GB, bboxes seperate) 0.9% of 1.28M
 - 429 baseball
