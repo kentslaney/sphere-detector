@@ -35,7 +35,13 @@ from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 mil_program = convert(hlo_module, minimum_deployment_target=ct.target.iOS18)
 
 pipeline = DEFAULT_HLO_PIPELINE
+pipeline.set_options("common::const_elimination", {"skip_const_by_size": "1e5"})
 pipeline.remove_passes(['common::add_int16_cast'])
+
+import logging
+from coremltools import _logger as logger
+logger_level = logger.level
+logger.setLevel(logging.ERROR)
 
 cml_model = ct.convert(
     mil_program,
@@ -47,6 +53,8 @@ cml_model = ct.convert(
         "_arg0", shape=target, color_layout=ct.colorlayout.GRAYSCALE_FLOAT16,
         channel_first=True)],
 )
+
+logger.setLevel(logger_level)
 
 dist = local / "dist"
 dist.mkdir(parents=True, exist_ok=True)
