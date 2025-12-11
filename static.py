@@ -191,12 +191,13 @@ class Depth(object):
 
     @staticmethod
     def scharr(arr):
-        kernel = jnp.array([[-3, -10, -3], [0, 0, 0], [3, 10, 3]])
-        l1 = jnp.sum(jnp.abs(kernel))
+        kernel = [[-3, -10, -3], [0, 0, 0], [3, 10, 3]]
+        l1 = sum(map(abs, sum(kernel, [])))
+        kernel = jnp.array(kernel) / l1
         kw = { 'boundary': 'fill', 'fillvalue': 0, 'mode': 'same' }
         return jnp.stack((
                 correlate2d(arr, kernel, **kw),
-                correlate2d(arr, kernel.T, **kw)), -1) / l1
+                correlate2d(arr, kernel.T, **kw)), -1)
 
     @cached_property
     def norm2(self):

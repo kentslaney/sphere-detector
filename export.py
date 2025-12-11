@@ -35,7 +35,7 @@ from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 mil_program = convert(hlo_module, minimum_deployment_target=ct.target.iOS18)
 
 pipeline = DEFAULT_HLO_PIPELINE
-pipeline.set_options("common::const_elimination", {"skip_const_by_size": "1e5"})
+pipeline.set_options("common::const_elimination", {"skip_const_by_size": "1e2"})
 pipeline.remove_passes(['common::add_int16_cast'])
 
 import logging
@@ -47,7 +47,8 @@ cml_model = ct.convert(
     mil_program,
     source="milinternal",
     minimum_deployment_target=ct.target.iOS18,
-    compute_units=ct.ComputeUnit.ALL,
+    # compute_units=ct.ComputeUnit.ALL,
+    compute_units=ct.ComputeUnit.CPU_ONLY,
     pass_pipeline=pipeline,
     inputs=[ct.ImageType(
         "_arg0", shape=target, color_layout=ct.colorlayout.GRAYSCALE_FLOAT16,
