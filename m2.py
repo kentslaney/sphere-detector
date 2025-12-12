@@ -12,7 +12,7 @@ im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "m2_out8.npy")
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    # for im in [im4, im5, im7, im8]:
-    for im in [im4]:
+    for im in [im4, im5, im7, im8]:
+    # for im in [im4]:
         im.draw_candidates(plt.subplots()[1])
         plt.show()

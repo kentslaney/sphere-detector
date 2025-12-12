@@ -46,9 +46,13 @@ ds = to_jax(ds)
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     for n, i in enumerate(ds):
-        ax = plt.subplots()[1]
-        i.raster().draw_candidates(ax)
-        i.draw_annotations(ax)
+        ax = plt.subplots(1, 2)[1]
+        i.raster().draw_candidates(ax[0])
+        i.raster().draw_candidates(ax[1], 0)
+        i.draw_annotations(ax[0])
+        i.draw_annotations(ax[1])
+        ax[0].set_title("max_outliers=3")
+        ax[1].set_title("max_outliers=0")
         plt.show()
         if (n + 1) % 100 == 0:
             input(f"shown {n + 1} of ~10k; press enter to continue:")

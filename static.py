@@ -160,10 +160,10 @@ class Raster:
         if cache is not None:
             self.cache = cache
 
-    def draw_candidates(self, ax):
+    def draw_candidates(self, ax, max_outliers=3):
         import matplotlib.patches as patches
         ax.imshow(self.cropped())
-        _, bboxes = self.depth.binned().nominate()
+        _, bboxes = self.depth.binned(max_outliers).nominate()
         kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
         for i in jnp.unstack(bboxes):
             rect = patches.Rectangle(i[1::-1], *(i[:1:-1] - i[1::-1]), **kw)
@@ -315,6 +315,7 @@ class Depth(object):
         out = out.at[r, c].set(deref, mode="drop")
         return out
 
+    # TODO: scatter_max for max_outliers == 0
     @jax.jit(static_argnames=['max_outliers'])
     def binned(self, max_outliers=3):
         counts = self.density()
@@ -326,9 +327,10 @@ class Depth(object):
             binner(1,  1),
             binner(0, -1),
             binner(1, -1)), -3), -1)
-        idx = jnp.minimum(max_outliers, jnp.int32(counts * self.delta))
-        bounds = jnp.take_along_axis(
-                bounds, idx[..., None, None], axis=-1).squeeze(axis=-1)
+        if max_outliers > 0:
+            idx = jnp.minimum(max_outliers, jnp.int32(counts * self.delta))
+            bounds = jnp.take_along_axis(bounds, idx[..., None, None], axis=-1)
+        bounds = bounds.squeeze(axis=-1)
         return Bins(bounds, counts, jnp.array([0, 0]), jnp.array([1, 1]))
 
     @jax.jit(static_argnames=['topk'])
@@ -426,6 +428,7 @@ class Bins(object):
         bound = jnp.where(small <= __class__.gamma * large, overrun, merged)
         return { 'bound': bound, 'count': a['count'] + b['count'] }
 
+    # TODO: max pooling as threshold instead of custom kernel
     def merge(self):
         f = jax.lax.reduce_window
         init = { 'bound': -1, 'count': 0 }

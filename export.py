@@ -27,7 +27,6 @@ hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 # print(jax_density.lower(*input_shapes).as_text())
 # exit(0)
 
-# TODO: patch via forked submodule to https://github.com/apple/coremltools/pull/2626
 import coremltools as ct
 from stablehlo_coreml.converter import convert
 from stablehlo_coreml import DEFAULT_HLO_PIPELINE
