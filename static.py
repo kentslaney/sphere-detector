@@ -191,7 +191,7 @@ class Depth(object):
 
     @staticmethod
     def scharr(arr):
-        kernel = [[-3, -10, -3], [0, 0, 0], [3, 10, 3]]
+        kernel = [[-47, -162, -47], [0, 0, 0], [47, 162, 47]]
         l1 = sum(map(abs, sum(kernel, [])))
         kernel = jnp.array(kernel) / l1
         kw = { 'boundary': 'fill', 'fillvalue': 0, 'mode': 'same' }
