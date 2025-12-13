@@ -318,6 +318,8 @@ class Bins(object):
 
     def metric(self):
         areas, total = self.area(), self.counts.size
+        # TODO: total * scale is almost constant across scales, and this
+        #       just incentivizes sourced area vs counts, not center density
         return (self.counts + self.alpha * jnp.sum(self.counts) / total) / (
                 areas + self.alpha * total * self.scale[0] * self.scale[1])
 

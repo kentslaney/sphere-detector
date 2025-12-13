@@ -12,7 +12,7 @@ import jax.numpy as jnp
 @jax.jit
 def jax_density(x):
     x = x.reshape(target)
-    return M2(jnp.array([]), x).depth.binned().nominate()
+    return M2(jnp.array([]), x).depth.binned().nominate()[1]
     # return M2(jnp.array([]), x).depth.density()
 
 from jax._src.lib.mlir import ir
@@ -33,9 +33,13 @@ from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 
 mil_program = convert(hlo_module, minimum_deployment_target=ct.target.iOS18)
 
+mil_args = mil_program.functions[
+        mil_program.default_function_name].inputs.keys()
+mil_arg0 = next(iter(mil_args))
+
 pipeline = DEFAULT_HLO_PIPELINE
 pipeline.set_options("common::const_elimination", {"skip_const_by_size": "1e2"})
-pipeline.remove_passes(['common::add_int16_cast'])
+# pipeline.remove_passes(['common::add_int16_cast'])
 
 import logging
 from coremltools import _logger as logger
@@ -50,7 +54,7 @@ cml_model = ct.convert(
     # compute_units=ct.ComputeUnit.CPU_ONLY,
     pass_pipeline=pipeline,
     inputs=[ct.ImageType(
-        "_arg0", shape=target, color_layout=ct.colorlayout.GRAYSCALE_FLOAT16,
+        mil_arg0, shape=target, color_layout=ct.colorlayout.GRAYSCALE_FLOAT16,
         channel_first=True)],
 )
 
@@ -59,4 +63,11 @@ logger.setLevel(logger_level)
 dist = local / "dist"
 dist.mkdir(parents=True, exist_ok=True)
 
-cml_model.save(str(dist / "centers.mlpackage"))
+spec = cml_model.get_spec()
+# ct.utils.rename_feature(spec, '_arg0', 'depth')
+ct.utils.rename_feature(spec, next(iter(cml_model.input_description)), 'depth')
+ct.utils.rename_feature(
+        spec, next(iter(cml_model.output_description)), 'bounds')
+model = ct.models.MLModel(spec, weights_dir=cml_model.weights_dir)
+
+model.save(str(dist / "centers.mlpackage"))

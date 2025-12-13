@@ -9,4 +9,4 @@
 	url = git@github.com:kentslaney/stablehlo-coreml.git
 [submodule "assets/coremltools"]
 	path = assets/coremltools
-	url = https://github.com/kentslaney/coremltools
+	url = git@github.com:kentslaney/coremltools

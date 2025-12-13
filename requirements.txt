@@ -11,6 +11,8 @@ torch
 torchvision
 jupyterlab-vim
 tensorflow_datasets
+# tensorflow
+# tensorflow-metal
 # tensorflow-cpu
 # jax[cuda13]
 jax
