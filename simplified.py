@@ -293,8 +293,8 @@ class Bins(object):
     win = ((2, 2), (2, 2))
     off = (
             (slice(0, -1), slice(0, -1)),
-            # (slice(1, None), slice(0, -1)),
-            # (slice(0, -1), slice(1, None)),
+            (slice(1, None), slice(0, -1)),
+            (slice(0, -1), slice(1, None)),
             (slice(1, None), slice(1, None)))
 
     def merge(self):
@@ -304,15 +304,15 @@ class Bins(object):
         reduced = jnp.stack((
                 f(self.bounds[..., 0], self.shape[0], jax.lax.min, *self.win),
                 f(self.bounds[..., 1], self.shape[1], jax.lax.min, *self.win),
-                f(self.bounds[..., 2], 0, jax.lax.max, *self.win),
-                f(self.bounds[..., 3], 0, jax.lax.max, *self.win)), -1)
+                f(self.bounds[..., 2], -1, jax.lax.max, *self.win),
+                f(self.bounds[..., 3], -1, jax.lax.max, *self.win)), -1)
         counts = f(self.counts, 0, jax.lax.add, *self.win)
         return __class__(
                 self.shape, reduced, counts,
                 self.origin, self.scale * jnp.array(self.win[1]))
 
     def area(self):
-        hi = self.bounds[..., 2:] + (self.bounds[..., 2:] < -1)
+        hi = self.bounds[..., 2:] + (self.bounds[..., 2:] < 0)
         y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
         return y * x
 
