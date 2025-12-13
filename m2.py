@@ -2,7 +2,7 @@ import sys, pathlib
 local = pathlib.Path(__file__).parents[0]
 
 sys.path.insert(0, str(local))
-from static import *
+from simplified import *
 sys.path.pop(0)
 
 im4 = M2.file(examples_dir / "IMG_0004.HEIC", cache_dir / "m2_out4.npy")

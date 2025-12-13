@@ -1,7 +1,7 @@
 import pathlib, sys
 local = pathlib.Path(__file__).parents[0]
 sys.path.insert(0, str(local))
-from static import Depth, M2
+from simplified import Depth, M2
 sys.path.pop(0)
 
 target = M2.target
@@ -12,8 +12,8 @@ import jax.numpy as jnp
 @jax.jit
 def jax_density(x):
     x = x.reshape(target)
-    # return M2(jnp.array([]), x).depth.binned().nominate()
-    return M2(jnp.array([]), x).depth.density()
+    return M2(jnp.array([]), x).depth.binned().nominate()
+    # return M2(jnp.array([]), x).depth.density()
 
 from jax._src.lib.mlir import ir
 from jax._src.interpreters import mlir as jax_mlir
