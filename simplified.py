@@ -127,8 +127,7 @@ class Raster:
 
     @property
     def coord(self):
-        x, y = jnp.meshgrid(*map(
-            partial(jnp.arange, dtype=jnp.int16), self.spec[::-1]))
+        x, y = jnp.meshgrid(*map(jnp.arange, self.spec[::-1]))
         return jnp.stack((y, x), -1)
 
     def cropped(self):
@@ -170,8 +169,7 @@ class Depth(object):
 
     @cached_property
     def coord(self):
-        x, y = jnp.meshgrid(*map(
-            partial(jnp.arange, dtype=jnp.int16), self.depth.shape[::-1]))
+        x, y = jnp.meshgrid(*map(jnp.arange, self.depth.shape[::-1]))
         return jnp.stack((y, x), -1)
 
     @staticmethod
@@ -262,7 +260,7 @@ class Casts2d(object):
     shape: any
     indices: any
 
-    dtype = jnp.int16
+    dtype = jnp.int32
 
     def __init__(self, shape, continuous):
         self.shape, shape = shape, jnp.array(shape)
@@ -375,8 +373,7 @@ class Bins(object):
 
     @property
     def coord(self):
-        x, y = jnp.meshgrid(*map(
-            partial(jnp.arange, dtype=jnp.int16), self.counts.shape[::-1]))
+        x, y = jnp.meshgrid(*map(jnp.arange, self.counts.shape[::-1]))
         return jnp.stack((y, x), -1)
 
     def sources(self): # inclusive ranges
