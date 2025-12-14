@@ -331,6 +331,13 @@ class Bins(object):
                 metric, 1 - self.beta * metric.size ** -0.5, method="higher")
         return jnp.sum(jnp.where(metric >= cutoff, metric, 0))
 
+    def combine(self, metric):
+        freq = -(-metric.size // 2 ** 14)
+        cutoff = jnp.quantile(
+                metric[::freq], 1 - self.beta * metric.size ** -0.5,
+                method="higher")
+        return jnp.sum(jnp.where(metric >= cutoff, metric, 0))
+
     def combined(self):
         return jnp.ceil(self.beta * jnp.sqrt(self.counts.size))
 
