@@ -239,6 +239,9 @@ class Depth(object):
     def masked(self):
         return jnp.where(self.inwards[..., None], self.centers, -1)
 
+    # TODO: Welford's algorithm to calculate variance for outlier detection.
+    #       The simple version of outlier detection didn't seem to help much
+    #       but there are still bounding boxes that suffer from outside noise.
     @jax.jit
     def binned(self):
         indices = Casts2d(self.depth.shape, self.masked)
@@ -291,7 +294,7 @@ class Bins(object):
     scale: any
 
     alpha = 0.1 # density stabilization coefficient
-    beta = 0.1 # proportion of pixels' metrics combined
+    beta = 1.5 # count exponent; no real justification
     win = ((2, 2), (2, 2))
     off = (
             (slice(0, -1), slice(0, -1)),
@@ -319,32 +322,12 @@ class Bins(object):
         y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
         return jnp.int32(y) * x
 
+    @cached_property
     def metric(self):
         areas, total = self.area(), self.counts.size
-        # TODO: total * scale is almost constant across scales, and this
-        #       just incentivizes sourced area vs counts, not center density
-        return (self.counts + self.alpha * jnp.sum(self.counts) / total) / (
-                areas + self.alpha * total * self.scale[0] * self.scale[1])
-
-    def combine(self, metric):
-        cutoff = jnp.quantile(
-                metric, 1 - self.beta * metric.size ** -0.5, method="higher")
-        return jnp.sum(jnp.where(metric >= cutoff, metric, 0))
-
-    def combine(self, metric):
-        freq = -(-metric.size // 2 ** 14)
-        cutoff = jnp.quantile(
-                metric[::freq], 1 - self.beta * metric.size ** -0.5,
-                method="higher")
-        return jnp.sum(jnp.where(metric >= cutoff, metric, 0))
-
-    def combined(self):
-        return jnp.ceil(self.beta * jnp.sqrt(self.counts.size))
-
-    def normalized(self):
-        metric = self.metric()
-        mean = self.combine(metric) / self.combined()
-        return metric / mean
+        return (self.counts ** self.beta) / (
+                areas + self.alpha * total * self.scale[0] * self.scale[1]) / (
+                self.scale[0] * self.scale[1])
 
     def __getitem__(self, key):
         origin = jnp.array([i.start for i in key]) * self.scale + self.origin
@@ -352,12 +335,11 @@ class Bins(object):
                 self.shape, self.bounds[key], self.counts[key],
                 origin, self.scale)
 
-    @jax.jit
     def sifted(self):
         hi, val = None, None
         for i in self.off:
             shift = self[i].merge()
-            total = jnp.sum(shift.metric())
+            total = jnp.sum(shift.metric)
             if val is None:
                 hi, val = total, shift
             else:
@@ -368,11 +350,11 @@ class Bins(object):
     @jax.jit(static_argnames=['candidates', 'seives'])
     def nominate(self, candidates=16, seives=None):
         scaled, seives = self, seives or int(math.log2(self.counts.size) // 3)
-        values = jnp.ravel(scaled.normalized())
+        values = jnp.ravel(scaled.metric)
         boundaries = scaled.bounds.reshape(-1, 4)
         for _ in range(seives):
             scaled = scaled.sifted()
-            values = jnp.concatenate((values, jnp.ravel(scaled.normalized())))
+            values = jnp.concatenate((values, jnp.ravel(scaled.metric)))
             boundaries = jnp.concatenate(
                     (boundaries, scaled.bounds.reshape(-1, 4)))
         values, indices = jax.lax.top_k(values, candidates)
