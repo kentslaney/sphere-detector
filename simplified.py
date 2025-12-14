@@ -127,7 +127,8 @@ class Raster:
 
     @property
     def coord(self):
-        x, y = jnp.meshgrid(*map(jnp.arange, self.spec[::-1]))
+        x, y = jnp.meshgrid(*map(
+            partial(jnp.arange, dtype=jnp.int16), self.spec[::-1]))
         return jnp.stack((y, x), -1)
 
     def cropped(self):
@@ -169,7 +170,8 @@ class Depth(object):
 
     @cached_property
     def coord(self):
-        x, y = jnp.meshgrid(*map(jnp.arange, self.depth.shape[::-1]))
+        x, y = jnp.meshgrid(*map(
+            partial(jnp.arange, dtype=jnp.int16), self.depth.shape[::-1]))
         return jnp.stack((y, x), -1)
 
     @staticmethod
@@ -260,19 +262,21 @@ class Casts2d(object):
     shape: any
     indices: any
 
+    dtype = jnp.int16
+
     def __init__(self, shape, continuous):
         self.shape, shape = shape, jnp.array(shape)
         assert continuous.shape[-1] == 2
         if continuous.ndim > 2:
             continuous = continuous.reshape(-1, 2)
-        floored = jnp.int32(jnp.floor(continuous))
+        floored = self.dtype(jnp.floor(continuous))
         valid = jnp.logical_and(floored >= 0, floored < shape[None])
         valid = jnp.logical_and(valid[:, 0], valid[:, 1])
         self.indices = jnp.where(valid[:, None], floored, shape[None])
 
     def scatter(self, mode, value, axis=None):
         fill = self.shape[axis] if mode == 'min' else -1 if mode == 'max' else 0
-        out = jnp.full(self.shape, fill, dtype=jnp.int32)
+        out = jnp.full(self.shape, fill, dtype=self.dtype)
         fn = getattr(out.at[self.indices[..., 0], self.indices[..., 1]], mode)
         return fn(value, mode="drop")
 
@@ -301,11 +305,12 @@ class Bins(object):
         f = jax.lax.reduce_window
         operand = lambda i: {
                 'bound': self.bounds[..., i], 'count': self.counts }
+        inits = tuple(map(self.bounds.dtype.type, self.shape + (-1, -1)))
         reduced = jnp.stack((
-                f(self.bounds[..., 0], self.shape[0], jax.lax.min, *self.win),
-                f(self.bounds[..., 1], self.shape[1], jax.lax.min, *self.win),
-                f(self.bounds[..., 2], -1, jax.lax.max, *self.win),
-                f(self.bounds[..., 3], -1, jax.lax.max, *self.win)), -1)
+                f(self.bounds[..., 0], inits[0], jax.lax.min, *self.win),
+                f(self.bounds[..., 1], inits[1], jax.lax.min, *self.win),
+                f(self.bounds[..., 2], inits[2], jax.lax.max, *self.win),
+                f(self.bounds[..., 3], inits[3], jax.lax.max, *self.win)), -1)
         counts = f(self.counts, 0, jax.lax.add, *self.win)
         return __class__(
                 self.shape, reduced, counts,
@@ -314,7 +319,7 @@ class Bins(object):
     def area(self):
         hi = self.bounds[..., 2:] + (self.bounds[..., 2:] < 0)
         y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
-        return y * x
+        return jnp.int32(y) * x
 
     def metric(self):
         areas, total = self.area(), self.counts.size
@@ -370,7 +375,8 @@ class Bins(object):
 
     @property
     def coord(self):
-        x, y = jnp.meshgrid(*map(jnp.arange, self.counts.shape[::-1]))
+        x, y = jnp.meshgrid(*map(
+            partial(jnp.arange, dtype=jnp.int16), self.counts.shape[::-1]))
         return jnp.stack((y, x), -1)
 
     def sources(self): # inclusive ranges
