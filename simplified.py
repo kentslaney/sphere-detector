@@ -352,7 +352,7 @@ class Bins(object):
         hi, val = None, None
         for i in self.off:
             shift = self[i].merge()
-            total = self.combine(shift.metric())
+            total = jnp.sum(shift.metric())
             if val is None:
                 hi, val = total, shift
             else:
