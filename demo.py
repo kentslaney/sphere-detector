@@ -1,4 +1,8 @@
 import cv2
+import torch
+import threading
+import queue
+import time
 import numpy as np
 from PIL import Image
 
@@ -7,6 +11,33 @@ local = pathlib.Path(__file__).parents[0]
 sys.path.insert(0, str(local))
 from simplified import *
 sys.path.pop(0)
+
+# TODO: pipeline batches up to an acceptable latency
+input_queue = queue.Queue(maxsize=1)
+output_queue = queue.Queue(maxsize=1)
+
+class PyTorchWorker(threading.Thread):
+    def __init__(self, model):
+        super().__init__(daemon=True)
+        self.model = model
+        self.stop = threading.Event()
+
+    def run(self):
+        # shouldn't be any CPU bottlenecks
+        torch.set_num_threads(1)
+
+        while not stop_event.is_set():
+            frame = input_queue.get()
+            # no eager io
+            results = self.model(frame.copy())
+
+            # Clear old result
+            if not output_queue.empty():
+                try:
+                    output_queue.get_nowait()
+                except queue.Empty:
+                    pass
+            output_queue.put(results)
 
 def pollnt(*titles):
     try:
@@ -21,9 +52,12 @@ def rect(im, bbox, color=(0, 255, 0), thickness=1, **kw):
     bbox = bbox.tolist() if hasattr(bbox, 'dtype') else bbox
     return cv2.rectangle(im, bbox[1::-1], bbox[3:1:-1], color, thickness, **kw)
 
+async def preview_dispatch():
+    pass
+
 cap = None
 
-def main(count_bboxes=3):
+def main(count_bboxes=3, live_bboxes=3):
     global cap
     if cap is not None:
         clean()
@@ -73,6 +107,8 @@ def main(count_bboxes=3):
                 sys.stdout.flush()
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
+        elif spin_key == ord('f'):
+            pass
 
         it = enumerate(queue)
         for level, group in it:
