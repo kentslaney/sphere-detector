@@ -8,37 +8,93 @@ sys.path.insert(0, str(local))
 from simplified import *
 sys.path.pop(0)
 
-cap = cv2.VideoCapture(0)
+def pollnt(*titles):
+    try:
+        for title in titles:
+            if not cv2.getWindowProperty(title, cv2.WND_PROP_VISIBLE):
+                return True
+    except cv2.error as e:
+        return True
+    return False
 
-while True:
-    ret, frame = cap.read()
+def rect(im, bbox, color=(0, 255, 0), thickness=1, **kw):
+    bbox = bbox.tolist() if hasattr(bbox, 'dtype') else bbox
+    return cv2.rectangle(im, bbox[1::-1], bbox[3:1:-1], color, thickness, **kw)
 
-    if not ret:
-        print("Can't receive frame (stream end?). Exiting ...")
-        break
+cap = None
 
-    cv2.imshow('preview', frame)
+def main(count_bboxes=3):
+    global cap
+    if cap is not None:
+        clean()
+    cap = cv2.VideoCapture(0)
 
-    spin_key = cv2.waitKey(1) & 0xFF
-    if spin_key == ord('q'):
-        break
-    elif spin_key == ord(' '):
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        im = Demo(Image.fromarray(frame_rgb))
-        frame = cv2.cvtColor(np.array(im.cropped()), cv2.COLOR_RGB2BGR)
+    queue = []
+    def window(*titles):
+        cv2.namedWindow("preview")
+        queue.append(titles)
+    window("preview")
 
-        _, bboxes = im.depth.binned().nominate()
-        for bbox in bboxes.tolist():
-            cv2.rectangle(frame, bbox[1::-1], bbox[3:1:-1], (0, 255, 0), 2)
+    while queue:
+        ret, frame = cap.read()
+
+        if not ret:
+            print("Can't receive frame (stream end?). Exiting ...")
+            break
 
         cv2.imshow('preview', frame)
-        cv2.waitKey(0)
 
-    try:
-        cv2.getWindowProperty('preview', cv2.WND_PROP_VISIBLE)
-    except cv2.error as e:
-        print(e)
-        break
+        spin_key = cv2.waitKey(1) & 0xFF
+        if spin_key == ord('q'):
+            for popped in queue.pop():
+                cv2.destroyWindow(popped)
+        elif spin_key == ord(' '):
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            im = Demo(Image.fromarray(frame_rgb))
+            smol = cv2.cvtColor(np.array(im.cropped()), cv2.COLOR_RGB2BGR)
 
-cap.release()
-cv2.destroyAllWindows()
+            _, bboxes = im.depth.binned().nominate(16)
+            for bbox in bboxes.tolist():
+                rect(smol, bbox)
+
+            counts = np.array(im.depth.binned().counts)
+            counts = np.uint8(counts / np.max(counts) * 255)
+            counts = cv2.applyColorMap(counts, cv2.COLORMAP_JET)
+
+            if count_bboxes:
+                for bbox in bboxes[:count_bboxes].tolist():
+                    rect(counts, bbox)
+
+            opening = {"bboxes": smol, "counts": counts, "capture": frame}
+            window(*opening.keys())
+            for title, showing in opening.items():
+                cv2.imshow(title, showing)
+            while pollnt(*opening.keys()):
+                sys.stdout.flush()
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+
+        it = enumerate(queue)
+        for level, group in it:
+            if pollnt(*group):
+                for sibling in group:
+                    cv2.destroyWindow(sibling)
+                parent = level - 1
+                for level, children in it:
+                    for child in children:
+                        cv2.destroyWindow(child)
+                for i in range(level - parent):
+                    queue.pop()
+
+    clean()
+
+def clean():
+    global cap
+    cap.release()
+    cap = None
+    clear()
+
+def clear():
+    cv2.destroyAllWindows()
+
+main()
