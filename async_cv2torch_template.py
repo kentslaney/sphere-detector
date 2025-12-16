@@ -63,6 +63,9 @@ def main_opencv_loop(model):
             break
 
         # Put the current frame in the input queue (overwrites previous if full)
+        # CHANGED: move copy after the queue
+        #     There's no way the garbage collector makes enough gains to justify
+        #         multiple copies per poll
         if not input_queue.full():
             input_queue.put(frame.copy())
 
