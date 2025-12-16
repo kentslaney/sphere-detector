@@ -134,7 +134,7 @@ class Raster:
         if self.target is None:
             return self.full
         size = jnp.array(self.full.size)
-        scaled = jnp.int32(jnp.max(self.shape / size) * size)
+        scaled = jnp.int32(jnp.max(self.shape[::-1] / size) * size)
         resample = self.full.resize(scaled)
         origin = (scaled - self.shape[::-1]) // 2
         return resample.crop(jnp.concat((origin, origin + self.shape[::-1])))
@@ -391,8 +391,15 @@ class Perspective(Raster):
         return self.data(self.cache / self.fov_sec)
 
 class M2(Perspective):
-    target = (392, 518)
+    target = (392, 518)  # coremltools benchmark resolution
     f_35mm = 18
+
+class Demo(Perspective):  # Logitech Webcam C925e
+    target = (1080, 1920)
+    f_35mm = 15.17  # 3.67 mm focal length / (1/3 inch sensor size) * (35mm)
+
+class Demo(Demo):  # testing
+    target = (392, 518)
 
 examples_dir = local / "assets" / "examples"
 cache_dir = local / "cache"

@@ -13,9 +13,9 @@ jupyterlab-vim
 tensorflow_datasets
 # tensorflow
 # tensorflow-metal
-# tensorflow-cpu
-# jax[cuda13]
-jax
+tensorflow-cpu
+jax[cuda13]
+# jax
 transformers
 -e ./assets/stablehlo_coreml
 tqdm
