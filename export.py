@@ -16,7 +16,8 @@ def jax_density(x):
     confidence = jnp.astype(confidence, jnp.float16)
     coordinates /= jnp.tile(jnp.array(target), [1, 2])
     coordinates = jnp.hstack((
-        coordinates[:, :2], coordinates[:, 2:] - coordinates[:, :2]))
+        coordinates[:, 1::-1],
+        coordinates[:, 3:1:-1] - coordinates[:, 1::-1] + 1))
     coordinates = jnp.astype(coordinates, jnp.float16)
     return confidence, coordinates
 
@@ -71,17 +72,20 @@ dist.mkdir(parents=True, exist_ok=True)
 spec = cml_model.get_spec()
 # ct.utils.rename_feature(spec, '_arg0', 'depth')
 ct.utils.rename_feature(spec, next(iter(cml_model.input_description)), 'depth')
-it = next(iter(cml_model.output_description))
-ct.utils.rename_feature(spec, it, 'confidence')
-ct.utils.rename_feature(spec, it, 'coordinates')
+it = iter(cml_model.output_description)
+ct.utils.rename_feature(spec, next(it), 'confidence')
+ct.utils.rename_feature(spec, next(it), 'coordinates')
 model = ct.models.MLModel(spec, weights_dir=cml_model.weights_dir)
 
 model.input_description["depth"] = (
     "Estimated, unitless, 518x392 depth map, as a grayscale output image."
 )
-model.output_description["bounds"] = (
-    "16 bounding box estimations, with the last dimension as "
-    "[min row, min col, max row, max col] (inclusive boundaries)"
+model.output_description["coordinates"] = (
+    "Bounding box estimations as a proportion, with the last dimension being "
+    "[x, y, width, height]"
+)
+model.output_description["confidence"] = (
+    "Emphasis on time/scene-stable meanings"
 )
 
 model.author = "Kent Slaney"
