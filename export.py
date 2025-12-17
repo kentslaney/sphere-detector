@@ -78,7 +78,8 @@ ct.utils.rename_feature(spec, next(it), 'coordinates')
 model = ct.models.MLModel(spec, weights_dir=cml_model.weights_dir)
 
 model.input_description["depth"] = (
-    "Estimated, unitless, 518x392 depth map, as a grayscale output image."
+    "Estimated, unitless, 518x392 depth map, as a grayscale output image. "
+    "Orthographic distance to projection plane."
 )
 model.output_description["coordinates"] = (
     "Bounding box estimations as a proportion, with the last dimension being "
