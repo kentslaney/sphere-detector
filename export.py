@@ -12,8 +12,13 @@ import jax.numpy as jnp
 @jax.jit
 def jax_density(x):
     x = x.reshape(target)
-    return M2(jnp.array([]), x).depth.binned().nominate()[1]
-    # return M2(jnp.array([]), x).depth.density()
+    confidence, coordinates = M2(jnp.array([]), x).depth.binned().nominate()
+    confidence = jnp.astype(confidence, jnp.float16)
+    coordinates /= jnp.tile(jnp.array(target), [1, 2])
+    coordinates = jnp.hstack((
+        coordinates[:, :2], coordinates[:, 2:] - coordinates[:, :2]))
+    coordinates = jnp.astype(coordinates, jnp.float16)
+    return confidence, coordinates
 
 from jax._src.lib.mlir import ir
 from jax._src.interpreters import mlir as jax_mlir
@@ -66,8 +71,23 @@ dist.mkdir(parents=True, exist_ok=True)
 spec = cml_model.get_spec()
 # ct.utils.rename_feature(spec, '_arg0', 'depth')
 ct.utils.rename_feature(spec, next(iter(cml_model.input_description)), 'depth')
-ct.utils.rename_feature(
-        spec, next(iter(cml_model.output_description)), 'bounds')
+it = next(iter(cml_model.output_description))
+ct.utils.rename_feature(spec, it, 'confidence')
+ct.utils.rename_feature(spec, it, 'coordinates')
 model = ct.models.MLModel(spec, weights_dir=cml_model.weights_dir)
+
+model.input_description["depth"] = (
+    "Estimated, unitless, 518x392 depth map, as a grayscale output image."
+)
+model.output_description["bounds"] = (
+    "16 bounding box estimations, with the last dimension as "
+    "[min row, min col, max row, max col] (inclusive boundaries)"
+)
+
+model.author = "Kent Slaney"
+model.license = "CC0"
+model.version = "0.1.0"
+model.user_defined_metadata["com.apple.coreml.model.preview.type"] = \
+        "objectDetector" # https://github.com/apple/coremltools/issues/2265
 
 model.save(str(dist / "centers.mlpackage"))
