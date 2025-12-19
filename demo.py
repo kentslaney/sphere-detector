@@ -1,7 +1,7 @@
 import cv2
 import torch
 import threading
-from collections import deque
+import collections
 import time
 import numpy as np
 from PIL import Image
@@ -12,10 +12,31 @@ sys.path.insert(0, str(local))
 from simplified import *
 sys.path.pop(0)
 
+class BlockingDeque:
+    def __init__(self, maxlen):
+        self.deque = collections.deque(maxlen=maxlen)
+        self.condition = threading.Condition()
+
+    def append(self, item):
+        with self.condition:
+            self.deque.append(item)
+            self.condition.notify()
+
+    def pop(self):
+        with self.condition:
+            while not self.deque:
+                self.condition.wait()
+            return self.deque.popleft()
+
+    def pop_nowait(self):
+        with self.condition:
+            if not self.deque:
+                raise IndexError()
+            return self.deque.popleft()
+
 # TODO: pipeline batches up to an acceptable latency
-input_queue = deque(maxlen=1)
-output_queue = deque(maxlen=1)
-daemon_stop = threading.Event()
+input_queue = BlockingDeque(maxlen=1)
+output_queue = BlockingDeque(maxlen=1)
 
 class Demo(Demo):
     def uncrop(self, coords):
@@ -38,17 +59,13 @@ class PyTorchWorker(threading.Thread):
         self.model = model
 
     def run(self):
-        daemon_stop.clear()
         # shouldn't be any CPU bottlenecks
         torch.set_num_threads(1)
 
-        while not daemon_stop.is_set():
-            try:
-                # TODO: is there a good reason deque doesn't have blocking pop?
-                frame = input_queue.pop()
-            except IndexError:
-                time.sleep(0.01)
-                continue
+        while True:
+            frame = input_queue.pop()
+            if frame is None:
+                return
             frame_rgb = cv2.cvtColor(frame.copy(), cv2.COLOR_BGR2RGB)
             results = self.model(Image.fromarray(frame_rgb))
 
@@ -123,7 +140,7 @@ def main(count_bboxes=3, live_bboxes=3):
                     break
 
         try:
-            bboxes = output_queue.pop()
+            bboxes = output_queue.pop_nowait()
             pending, frame = frame, frame.copy()
             rect(frame, *bboxes)
         except IndexError:
@@ -151,7 +168,7 @@ def main(count_bboxes=3, live_bboxes=3):
 
 def clean():
     global cap
-    daemon_stop.set()
+    input_queue.append(None)
     cap.release()
     cap = None
     clear()
