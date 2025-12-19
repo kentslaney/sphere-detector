@@ -52,7 +52,6 @@ class PyTorchWorker(threading.Thread):
             frame_rgb = cv2.cvtColor(frame.copy(), cv2.COLOR_BGR2RGB)
             results = self.model(Image.fromarray(frame_rgb))
 
-            print(results)
             output_queue.append(results)
 
 def pollnt(*titles):
@@ -66,7 +65,7 @@ def pollnt(*titles):
 
 def rect(im, *bboxes, color=(0, 255, 0), thickness=1, **kw):
     for bbox in bboxes:
-        bbox = bbox.tolist() if hasattr(bbox, 'dtype') else bbox
+        bbox = jnp.int32(bbox).tolist() if hasattr(bbox, 'dtype') else bbox
         cv2.rectangle(im, bbox[1::-1], bbox[3:1:-1], color, thickness, **kw)
 
 cap = None
@@ -84,6 +83,8 @@ def main(count_bboxes=3, live_bboxes=3):
         queue.append(titles)
     window("preview")
     preview_bboxes = False
+
+    worker.start()
 
     while queue:
         ret, frame = cap.read()
@@ -118,23 +119,16 @@ def main(count_bboxes=3, live_bboxes=3):
             for title, showing in opening.items():
                 cv2.imshow(title, showing)
             while pollnt(*opening.keys()):
-                sys.stdout.flush()
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
-        elif spin_key == ord('g'):
-            if not daemon_stop.is_set():
-                worker.start()
-            # else:
-            #     daemon_stop.set()
 
-        if preview_bboxes:
-            try:
-                bboxes = output_queue.pop()
-                pending, frame = frame, frame.copy()
-                rect(frame, *bboxes)
-            except IndexError:
-                pending = frame
-            input_queue.append(pending)
+        try:
+            bboxes = output_queue.pop()
+            pending, frame = frame, frame.copy()
+            rect(frame, *bboxes)
+        except IndexError:
+            pending = frame
+        input_queue.append(pending)
 
         it = enumerate(queue)
         for level, group in it:
