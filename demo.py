@@ -42,11 +42,11 @@ class Demo(Demo):
     def uncrop(self, coords):
         if self.target is None:
             return coords
-        size = jnp.array(self.spec)
-        unscale = jnp.max(self.shape[::-1] / size)
+        size = jnp.array(self.full.size[::-1])
+        unscale = jnp.max(self.shape / size)
         scaled = jnp.int32(unscale * size)
-        origin = (scaled - self.shape[::-1]) // 2
-        return jnp.int32(jnp.tile(origin, [1, 2]) + coords * unscale)
+        origin = (scaled - self.shape) // 2
+        return jnp.tile(origin, [1, 2]) + jnp.int32(coords / unscale)
 
 def demo_model(arr):
     im = Demo(arr)
@@ -144,7 +144,7 @@ def main(count_bboxes=3, live_bboxes=3):
         try:
             bboxes = output_queue.pop_nowait()
             pending, frame = frame, frame.copy()
-            rect(frame, *bboxes)
+            rect(frame, *bboxes[:live_bboxes])
         except IndexError:
             pending = frame
         if preview_bboxes:
