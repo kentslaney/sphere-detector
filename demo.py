@@ -46,7 +46,7 @@ class Demo(Demo):
         unscale = jnp.max(self.shape[::-1] / size)
         scaled = jnp.int32(unscale * size)
         origin = (scaled - self.shape[::-1]) // 2
-        return jnp.tile(origin, [1, 2]) + coords * unscale
+        return jnp.int32(jnp.tile(origin, [1, 2]) + coords * unscale)
 
 def demo_model(arr):
     im = Demo(arr)
@@ -82,7 +82,7 @@ def pollnt(*titles):
 
 def rect(im, *bboxes, color=(0, 255, 0), thickness=1, **kw):
     for bbox in bboxes:
-        bbox = jnp.int32(bbox).tolist() if hasattr(bbox, 'dtype') else bbox
+        bbox = bbox.tolist() if hasattr(bbox, 'dtype') else bbox
         cv2.rectangle(im, bbox[1::-1], bbox[3:1:-1], color, thickness, **kw)
 
 cap = None
