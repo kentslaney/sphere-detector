@@ -138,6 +138,8 @@ def main(count_bboxes=3, live_bboxes=3):
             while pollnt(*opening.keys()):
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
+        elif spin_key == ord('g'):
+            preview_bboxes = not preview_bboxes
 
         try:
             bboxes = output_queue.pop_nowait()
@@ -145,7 +147,8 @@ def main(count_bboxes=3, live_bboxes=3):
             rect(frame, *bboxes)
         except IndexError:
             pending = frame
-        input_queue.append(pending)
+        if preview_bboxes:
+            input_queue.append(pending)
 
         it = enumerate(queue)
         for level, group in it:
