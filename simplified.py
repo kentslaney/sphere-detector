@@ -245,12 +245,14 @@ class Depth(object):
     @jax.jit
     def binned(self):
         indices = Casts2d(self.depth.shape, self.masked)
-        counts = indices.scatter('add', 1)
+        counts = indices.scatter('add', 1, 0)
+        flat_0th = jnp.ravel(self.coord[..., 0])
+        flat_1st = jnp.ravel(self.coord[..., 1])
         bounds = jnp.stack((
-            indices.scatter('min', jnp.ravel(self.coord[..., 0]), 0),
-            indices.scatter('min', jnp.ravel(self.coord[..., 1]), 1),
-            indices.scatter('max', jnp.ravel(self.coord[..., 0]), 0),
-            indices.scatter('max', jnp.ravel(self.coord[..., 1]), 1)), -1)
+            indices.scatter('min', flat_0th, self.depth.shape[0]),
+            indices.scatter('min', flat_1st, self.depth.shape[1]),
+            indices.scatter('max', flat_0th, -1),
+            indices.scatter('max', flat_1st, -1)), -1)
         return Bins(
                 self.depth.shape, bounds, counts,
                 jnp.array([0, 0]), jnp.array([1, 1]))
@@ -263,21 +265,18 @@ class Casts2d(object):
     shape: any
     indices: any
 
-    dtype = jnp.int32
-
     def __init__(self, shape, continuous):
         self.shape, shape = shape, jnp.array(shape)
         assert continuous.shape[-1] == 2
         if continuous.ndim > 2:
             continuous = continuous.reshape(-1, 2)
-        floored = self.dtype(jnp.floor(continuous))
+        floored = jnp.int32(jnp.floor(continuous))
         valid = jnp.logical_and(floored >= 0, floored < shape[None])
         valid = jnp.logical_and(valid[:, 0], valid[:, 1])
         self.indices = jnp.where(valid[:, None], floored, shape[None])
 
-    def scatter(self, mode, value, axis=None):
-        fill = self.shape[axis] if mode == 'min' else -1 if mode == 'max' else 0
-        out = jnp.full(self.shape, fill, dtype=self.dtype)
+    def scatter(self, mode, value, fill):
+        out = jnp.full(self.shape, fill)
         fn = getattr(out.at[self.indices[..., 0], self.indices[..., 1]], mode)
         return fn(value, mode="drop")
 
@@ -304,8 +303,6 @@ class Bins(object):
 
     def merge(self):
         f = jax.lax.reduce_window
-        operand = lambda i: {
-                'bound': self.bounds[..., i], 'count': self.counts }
         inits = tuple(map(self.bounds.dtype.type, self.shape + (-1, -1)))
         reduced = jnp.stack((
                 f(self.bounds[..., 0], inits[0], jax.lax.min, *self.win),
