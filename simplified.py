@@ -225,25 +225,20 @@ class Depth(object):
         return self.coord - self.flat_radius_over_norm[..., None] * self.grad
 
     @cached_property
-    def w2(self):
-        sec2 = jnp.where(
-                self.inwards, self.rotated[..., 0, 0] / self.rotated[..., 1, 1],
-                1)
-        return jnp.where(self.norm2 != 0, (sec2 - 1) / self.norm2, 1)
-
-    @cached_property
-    def w(self):
-        return jnp.sqrt(self.w2)
+    def radii(self):
+        da2, db2 = self.rotated[..., 0, 0], self.rotated[..., 1, 1]
+        sec2 = jnp.where(self.inwards, da2 / (db2 ** 2 * (da2 - db2)), 1)
+        p = self.norm * jnp.sqrt(sec2)
+        bound = jnp.linalg.norm(jnp.array(self.depth.shape))
+        return jax.lax.min(bound, p)
 
     @cached_property
     def masked(self):
         return jnp.where(self.inwards[..., None], self.centers, -1)
 
-    # TODO: Welford's algorithm to calculate variance for outlier detection.
-    #       The simple version of outlier detection didn't seem to help much
-    #       but there are still bounding boxes that suffer from outside noise.
     @jax.jit
     def binned(self):
+        centers = self.masked.reshape(-1, 2)
         indices = Casts2d(self.depth.shape, self.masked)
         counts = indices.scatter('add', 1, 0)
         flat_0th = jnp.ravel(self.coord[..., 0])
@@ -253,9 +248,14 @@ class Depth(object):
             indices.scatter('min', flat_1st, self.depth.shape[1]),
             indices.scatter('max', flat_0th, -1),
             indices.scatter('max', flat_1st, -1)), -1)
-        return Bins(
+        bounds = Bounds(
                 self.depth.shape, bounds, counts,
-                jnp.array([0, 0]), jnp.array([1, 1]))
+                jnp.array([0, 0]), jnp.array([1, 1]), jnp.array([0, 0]))
+        return Bins(
+                bounds,
+                indices.stat(centers[:, 0]),
+                indices.stat(centers[:, 1]),
+                indices.stat(jnp.ravel(self.radii)))
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -280,21 +280,28 @@ class Casts2d(object):
         fn = getattr(out.at[self.indices[..., 0], self.indices[..., 1]], mode)
         return fn(value, mode="drop")
 
+    def stat(self, values):
+        return BinStat(
+                BinSum(self.scatter('add', values, 0.)),
+                BinSum(self.scatter('add', values ** 2, 0.)))
+
+bin_win = ((2, 2), (2, 2))  # dimensions, strides
+
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["bounds", "counts", "origin", "scale"],
+        data_fields=["bounds", "counts", "origin", "scale", "offset"],
         meta_fields=["shape"])
 @dataclass
-class Bins(object):
+class Bounds(object):
     shape: any
     bounds: any
     counts: any
     origin: any
     scale: any
+    offset: any
 
-    alpha = 0.1 # density stabilization coefficient
-    beta = 1.5 # count exponent; no real justification
-    win = ((2, 2), (2, 2))
+    alpha = 0.1  # density stabilization coefficient
+    beta = 1.5  # count exponent; no real justification
     off = (
             (slice(0, -1), slice(0, -1)),
             (slice(1, None), slice(0, -1)),
@@ -305,14 +312,14 @@ class Bins(object):
         f = jax.lax.reduce_window
         inits = tuple(map(self.bounds.dtype.type, self.shape + (-1, -1)))
         reduced = jnp.stack((
-                f(self.bounds[..., 0], inits[0], jax.lax.min, *self.win),
-                f(self.bounds[..., 1], inits[1], jax.lax.min, *self.win),
-                f(self.bounds[..., 2], inits[2], jax.lax.max, *self.win),
-                f(self.bounds[..., 3], inits[3], jax.lax.max, *self.win)), -1)
-        counts = f(self.counts, 0, jax.lax.add, *self.win)
+                f(self.bounds[..., 0], inits[0], jax.lax.min, *bin_win),
+                f(self.bounds[..., 1], inits[1], jax.lax.min, *bin_win),
+                f(self.bounds[..., 2], inits[2], jax.lax.max, *bin_win),
+                f(self.bounds[..., 3], inits[3], jax.lax.max, *bin_win)), -1)
+        counts = f(self.counts, 0, jax.lax.add, *bin_win)
         return __class__(
                 self.shape, reduced, counts,
-                self.origin, self.scale * jnp.array(self.win[1]))
+                self.origin, self.scale * jnp.array(bin_win[1]))
 
     def area(self):
         hi = self.bounds[..., 2:] + (self.bounds[..., 2:] < 0)
@@ -327,10 +334,11 @@ class Bins(object):
                 self.scale[0] * self.scale[1])
 
     def __getitem__(self, key):
-        origin = jnp.array([i.start for i in key]) * self.scale + self.origin
+        offset = jnp.array([i.start for i in key])
+        origin = offset * self.scale + self.origin
         return __class__(
                 self.shape, self.bounds[key], self.counts[key],
-                origin, self.scale)
+                origin, self.scale, offset)
 
     def sifted(self):
         hi, val = None, None
@@ -344,29 +352,58 @@ class Bins(object):
                         total > hi, lambda: (total, shift), lambda: (hi, val))
         return val
 
-    @jax.jit(static_argnames=['candidates', 'seives'])
-    def nominate(self, candidates=16, seives=None):
-        scaled, seives = self, seives or int(math.log2(self.counts.size) // 3)
-        values = jnp.ravel(scaled.metric)
-        boundaries = scaled.bounds.reshape(-1, 4)
-        for _ in range(seives):
-            scaled = scaled.sifted()
-            values = jnp.concatenate((values, jnp.ravel(scaled.metric)))
-            boundaries = jnp.concatenate(
-                    (boundaries, scaled.bounds.reshape(-1, 4)))
-        values, indices = jax.lax.top_k(values, candidates)
-        return values, boundaries[indices]
+@partial(
+        jax.tree_util.register_dataclass,
+        data_fields=["bounds", "center_0th", "center_1st", "radius"],
+        meta_fields=[])
+@dataclass
+class Bins(object):
+    bounds: any
+    center_0th: any
+    center_1st: any
+    radius: any
 
-    @property
-    def coord(self):
-        x, y = jnp.meshgrid(*map(jnp.arange, self.counts.shape[::-1]))
-        return jnp.stack((y, x), -1)
+    def sifted(self):
+        bounds = self.bounds.sifted()
+        return Bins(
+                bounds,
+                self.center_0th.merge(bounds.offset),
+                self.center_1st.merge(bounds.offset),
+                self.radius.merge(bounds.offset))
 
-    def sources(self): # inclusive ranges
-        broadcastable = self.scale[None, None]
-        top_left = self.origin[None, None] + broadcastable * self.coord
-        bottom_right = top_left + broadcastable - 1
-        return jnp.concatenate((top_left, bottom_right), axis=-1)
+# TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+@partial(
+        jax.tree_util.register_dataclass,
+        data_fields=["sum", "sum_sq"], meta_fields=[])
+@dataclass
+class BinStat(object):
+    sum: any
+    sum_sq: any
+
+    def merge(self, offset):
+        return BinStat(self.sum.merge(offset), self.sum_sq.merge(offset))
+
+    def mean(self, counts):
+        return self.sum.sum / counts
+
+    def var(self, counts):
+        return (self.sum_sq.sum - self.sum.sum ** 2 / counts) / (counts - 1)
+
+    def stat(self, counts):
+        mean = self.mean(counts)
+        return mean, (self.sum_sq.sum - self.sum.sum * mean) / (counts - 1)
+
+@partial(
+        jax.tree_util.register_dataclass,
+        data_fields=["sum"], meta_fields=[])
+@dataclass
+class BinSum(object):
+    sum: any
+
+    def merge(self, offset):
+        assert bin_win[0] == bin_win[1] == (2, 2)
+        shifted = jax.lax.dynamic_slice(offset, [i - 1 for i in self.sum.shape])
+        return BinSum(jax.lax.reduce_window(shifted, 0., jax.lax.add, *bin_win))
 
 class Perspective(Raster):
     f_35mm = None
