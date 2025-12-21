@@ -252,7 +252,7 @@ class Depth(object):
                 self.depth.shape, bounds, counts,
                 jnp.array([0, 0]), jnp.array([1, 1]), jnp.array([0, 0]))
         return Bins(
-                bounds,
+                True, bounds,
                 indices.stat(centers[:, 0]),
                 indices.stat(centers[:, 1]),
                 indices.stat(jnp.ravel(self.radii)))
@@ -319,7 +319,7 @@ class Bounds(object):
         counts = f(self.counts, 0, jax.lax.add, *bin_win)
         return __class__(
                 self.shape, reduced, counts,
-                self.origin, self.scale * jnp.array(bin_win[1]))
+                self.origin, self.scale * jnp.array(bin_win[1]), self.offset)
 
     def area(self):
         hi = self.bounds[..., 2:] + (self.bounds[..., 2:] < 0)
@@ -352,24 +352,54 @@ class Bounds(object):
                         total > hi, lambda: (total, shift), lambda: (hi, val))
         return val
 
+    @property
+    def coord(self):
+        x, y = jnp.meshgrid(*map(jnp.arange, self.counts.shape[::-1]))
+        return jnp.stack((y, x), -1)
+
+    @property
+    def centers(self):
+        broadcastable = self.scale[None, None]
+        return self.origin[None, None] + \
+                broadcastable * self.coord + broadcastable // 2
+
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["bounds", "center_0th", "center_1st", "radius"],
-        meta_fields=[])
+        meta_fields=["leaves"])
 @dataclass
 class Bins(object):
+    leaves: any
     bounds: any
     center_0th: any
     center_1st: any
     radius: any
 
+    @property
+    def counts(self):
+        return self.bounds.counts
+
     def sifted(self):
         bounds = self.bounds.sifted()
         return Bins(
-                bounds,
+                False, bounds,
                 self.center_0th.merge(bounds.offset),
                 self.center_1st.merge(bounds.offset),
                 self.radius.merge(bounds.offset))
+
+    @cached_property
+    def primaries(self):
+        assert bin_win[0] == bin_win[1] == (2, 2)
+        assert not self.leaves
+        centers = self.bounds.centers
+        primary_0th = self.center_0th.mean(self.counts) > centers[..., 0]
+        primary_1st = self.center_1st.mean(self.counts) > centers[..., 1]
+        alternating = jnp.array([True, False])
+        alternating_0th = jnp.tile(alternating[:, None], self.counts.shape)
+        alternating_1st = jnp.tile(alternating[None, :], self.counts.shape)
+        _0th = jnp.logical_xor(jnp.repeat(primary_0th, 2, 0), alternating_0th)
+        _1st = jnp.logical_xor(jnp.repeat(primary_1st, 2, 1), alternating_1st)
+        return jnp.logical_and(jnp.repeat(_0th, 2, 1), jnp.repeat(_1st, 2, 0))
 
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(
@@ -402,7 +432,8 @@ class BinSum(object):
 
     def merge(self, offset):
         assert bin_win[0] == bin_win[1] == (2, 2)
-        shifted = jax.lax.dynamic_slice(offset, [i - 1 for i in self.sum.shape])
+        shape = [i - 1 for i in self.sum.shape]
+        shifted = jax.lax.dynamic_slice(self.sum, offset, shape)
         return BinSum(jax.lax.reduce_window(shifted, 0., jax.lax.add, *bin_win))
 
 class Perspective(Raster):
