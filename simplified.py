@@ -249,10 +249,10 @@ class Depth(object):
             indices.scatter('max', flat_0th, -1),
             indices.scatter('max', flat_1st, -1)), -1)
         bounds = Bounds(
-                self.depth.shape, bounds, counts,
-                jnp.array([0, 0]), jnp.array([1, 1]), jnp.array([0, 0]))
+                self.depth.shape, 1, bounds, counts,
+                jnp.array([0, 0]), jnp.array([0, 0]))
         return Bins(
-                True, bounds,
+                0, bounds,
                 indices.stat(centers[:, 0]),
                 indices.stat(centers[:, 1]),
                 indices.stat(jnp.ravel(self.radii)))
@@ -289,19 +289,17 @@ bin_win = ((2, 2), (2, 2))  # dimensions, strides
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["bounds", "counts", "origin", "scale", "offset"],
-        meta_fields=["shape"])
+        data_fields=["bounds", "counts", "origin", "offset"],
+        meta_fields=["shape", "scale"])
 @dataclass
 class Bounds(object):
     shape: any
+    scale: any
     bounds: any
     counts: any
     origin: any
-    scale: any
     offset: any
 
-    alpha = 0.1  # density stabilization coefficient
-    beta = 1.5  # count exponent; no real justification
     off = (
             (slice(0, -1), slice(0, -1)),
             (slice(1, None), slice(0, -1)),
@@ -317,9 +315,10 @@ class Bounds(object):
                 f(self.bounds[..., 2], inits[2], jax.lax.max, *bin_win),
                 f(self.bounds[..., 3], inits[3], jax.lax.max, *bin_win)), -1)
         counts = f(self.counts, 0, jax.lax.add, *bin_win)
+        assert bin_win[0] == bin_win[1] == (2, 2)
         return __class__(
-                self.shape, reduced, counts,
-                self.origin, self.scale * jnp.array(bin_win[1]), self.offset)
+                self.shape, self.scale * bin_win[1][0], reduced, counts,
+                self.origin, self.offset)
 
     def area(self):
         hi = self.bounds[..., 2:] + (self.bounds[..., 2:] < 0)
@@ -328,17 +327,18 @@ class Bounds(object):
 
     @cached_property
     def metric(self):
-        areas, total = self.area(), self.counts.size
-        return (self.counts ** self.beta) / (
-                areas + self.alpha * total * self.scale[0] * self.scale[1]) / (
-                self.scale[0] * self.scale[1])
+        # counts ~ area
+        # counts ** 1.5 / area / sqrt(scale) ~ sqrt(area / scale)
+        # which is resolution invariant
+        return (self.counts ** 1.5) / \
+                jax.lax.max(self.area(), self.scale ** 2) / self.scale
 
     def __getitem__(self, key):
         offset = jnp.array([i.start for i in key])
         origin = offset * self.scale + self.origin
         return __class__(
-                self.shape, self.bounds[key], self.counts[key],
-                origin, self.scale, offset)
+                self.shape, self.scale, self.bounds[key], self.counts[key],
+                origin, offset)
 
     def sifted(self):
         hi, val = None, None
@@ -359,17 +359,17 @@ class Bounds(object):
 
     @property
     def centers(self):
-        broadcastable = self.scale[None, None]
+        assert self.scale > 1
         return self.origin[None, None] + \
-                broadcastable * self.coord + broadcastable // 2
+                self.scale * self.coord + self.scale // 2
 
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["bounds", "center_0th", "center_1st", "radius"],
-        meta_fields=["leaves"])
+        meta_fields=["level"])
 @dataclass
 class Bins(object):
-    leaves: any
+    level: any
     bounds: any
     center_0th: any
     center_1st: any
@@ -381,8 +381,8 @@ class Bins(object):
 
     def sifted(self):
         bounds = self.bounds.sifted()
-        return Bins(
-                False, bounds,
+        return __class__(
+                self.level + 1, bounds,
                 self.center_0th.merge(bounds.offset),
                 self.center_1st.merge(bounds.offset),
                 self.radius.merge(bounds.offset))
@@ -390,7 +390,6 @@ class Bins(object):
     @cached_property
     def primaries(self):
         assert bin_win[0] == bin_win[1] == (2, 2)
-        assert not self.leaves
         centers = self.bounds.centers
         primary_0th = self.center_0th.mean(self.counts) > centers[..., 0]
         primary_1st = self.center_1st.mean(self.counts) > centers[..., 1]
