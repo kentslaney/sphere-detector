@@ -250,7 +250,7 @@ class Depth(object):
             indices.scatter('max', flat_1st, -1)), -1)
         bounds = Bounds(
                 self.depth.shape, 1, bounds, counts,
-                jnp.array([0, 0]), jnp.array([0, 0]))
+                jnp.array([0, 0]), jnp.array([0, 0]), None)
         return Bins(
                 0, bounds,
                 indices.stat(centers[:, 0]),
@@ -290,7 +290,7 @@ bin_win = ((2, 2), (2, 2))  # dimensions, strides
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["bounds", "counts", "origin", "offset"],
-        meta_fields=["shape", "scale"])
+        meta_fields=["shape", "scale", "upscale"])
 @dataclass
 class Bounds(object):
     shape: any
@@ -299,6 +299,7 @@ class Bounds(object):
     counts: any
     origin: any
     offset: any
+    upscale: any
 
     off = (
             (slice(0, -1), slice(0, -1)),
@@ -318,7 +319,7 @@ class Bounds(object):
         assert bin_win[0] == bin_win[1] == (2, 2)
         return __class__(
                 self.shape, self.scale * bin_win[1][0], reduced, counts,
-                self.origin, self.offset)
+                self.origin, self.offset, self.upscale)
 
     def area(self):
         hi = self.bounds[..., 2:] + (self.bounds[..., 2:] < 0)
@@ -338,7 +339,7 @@ class Bounds(object):
         origin = offset * self.scale + self.origin
         return __class__(
                 self.shape, self.scale, self.bounds[key], self.counts[key],
-                origin, offset)
+                origin, offset, self.counts.shape)
 
     def sifted(self):
         hi, val = None, None
@@ -402,12 +403,16 @@ class Bins(object):
 
     def unshift(self, arr, fill=None):
         fill = jnp.zeros((), dtype=arr.dtype) if fill is None else fill
+        full = lambda i, n: jnp.full(
+                (arr.shape[:i] + (1,) + arr.shape[i + 1:]), fill)
         for i, prefix in enumerate(self.bounds.offset):
-            adding = jnp.full((arr.shape[:i] + (1,) + arr.shape[i + 1:]), fill)
             arr = jax.lax.cond(
                     prefix == 1,
-                    lambda: jnp.concat((adding, arr), axis=i),
-                    lambda: jnp.concat((arr, adding), axis=i))
+                    lambda: jnp.concat((full(i, 1), arr), axis=i),
+                    lambda: jnp.concat((arr, full(i, 1)), axis=i))
+            arr = jnp.concat(
+                    (arr, full(i, arr.shape[i] - self.bounds.upscale[i])),
+                    axis=i)
         return arr
 
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
