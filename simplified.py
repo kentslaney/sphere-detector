@@ -353,7 +353,7 @@ class Bounds(object):
                         total > hi, lambda: (total, shift), lambda: (hi, val))
         return val
 
-    @property
+    @cached_property
     def coord(self):
         x, y = jnp.meshgrid(*map(jnp.arange, self.counts.shape[::-1]))
         return jnp.stack((y, x), -1)
@@ -404,16 +404,49 @@ class Bins(object):
     def unshift(self, arr, fill=None):
         fill = jnp.zeros((), dtype=arr.dtype) if fill is None else fill
         full = lambda i, n: jnp.full(
-                (arr.shape[:i] + (1,) + arr.shape[i + 1:]), fill)
+                (arr.shape[:i] + (n,) + arr.shape[i + 1:]), fill)
         for i, prefix in enumerate(self.bounds.offset):
             arr = jax.lax.cond(
                     prefix == 1,
                     lambda: jnp.concat((full(i, 1), arr), axis=i),
                     lambda: jnp.concat((arr, full(i, 1)), axis=i))
             arr = jnp.concat(
-                    (arr, full(i, arr.shape[i] - self.bounds.upscale[i])),
+                    (arr, full(i, self.bounds.upscale[i] - arr.shape[i])),
                     axis=i)
+        assert arr.shape[:2] == self.bounds.upscale[:2]
         return arr
+
+    def pyramids(self, init=None):
+        inc = jnp.ones_like(self.counts) if init is None else init + 1
+        upscaled = jnp.repeat(jnp.repeat(inc, 2, 0), 2, 1)
+        return self.unshift(upscaled * self.primaries)
+
+@partial(
+        jax.tree_util.register_dataclass,
+        data_fields=["stack"], meta_fields=[])
+@dataclass
+class Seives(object):
+    stack: any
+
+    def __init__(self, base, layers=None):
+        layers = int(math.log2(base.counts.size) // 3) if layers is None \
+                else layers - 1
+        out = [base]
+        for _ in range(layers):
+            out.append(out[-1].sifted())
+        self.stack = tuple(out)
+
+    @cached_property
+    def offsets(self):
+        return jnp.vstack(tuple(i.bounds.offset for i in self.stack))
+
+    @cached_property
+    def pyramids(self):
+        cur, out = None, []
+        for layer in self.stack[:0:-1]:
+            cur = layer.pyramids(cur)
+            out.append(cur)
+        return tuple(out[::-1])
 
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(
