@@ -400,6 +400,16 @@ class Bins(object):
         _1st = jnp.logical_xor(jnp.repeat(primary_1st, 2, 1), alternating_1st)
         return jnp.logical_and(jnp.repeat(_0th, 2, 1), jnp.repeat(_1st, 2, 0))
 
+    def unshift(self, arr, fill=None):
+        fill = jnp.zeros((), dtype=arr.dtype) if fill is None else fill
+        for i, prefix in enumerate(self.bounds.offset):
+            adding = jnp.full((arr.shape[:i] + (1,) + arr.shape[i + 1:]), fill)
+            arr = jax.lax.cond(
+                    prefix == 1,
+                    lambda: jnp.concat((adding, arr), axis=i),
+                    lambda: jnp.concat((arr, adding), axis=i))
+        return arr
+
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(
         jax.tree_util.register_dataclass,

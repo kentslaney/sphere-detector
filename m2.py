@@ -16,7 +16,7 @@ if __name__ == "__main__":
     for im in [im4]:
         bins = im.depth.binned().sifted()
         # plt.imshow(bins.radius.mean(bins.bounds.counts))
-        plt.imshow(bins.primaries)
+        plt.imshow(bins.unshift(bins.primaries))
         plt.show()
         bins = bins.sifted()
         plt.imshow(bins.primaries)
