@@ -448,6 +448,33 @@ class Seives(object):
             out.append(cur)
         return tuple(out[::-1])
 
+    def nms(self):
+        # Only primaries can be candidates, subject to the filter:
+        #     Primaries block out 1 level down surroundings
+        #         whose common ancestor
+        #             is a primary or is the first non-primary in the path
+        empty = jnp.zeros((4, 4), dtype=jnp.bool)
+        kernels = \
+            [  [empty.at[0, 0].set(True)
+            ,   empty.at[0, 3].set(True)
+            ,   empty.at[3, 0].set(True)
+            ,   empty.at[3, 3].set(True)
+            ], [empty.at[1:4, 0].set(True)
+            ,   empty.at[1:4, 3].set(True)
+            ,   empty.at[0:3, 0].set(True)
+            ,   empty.at[0:3, 3].set(True)
+            ], [empty.at[0, 1:4].set(True)
+            ,   empty.at[0, 0:3].set(True)
+            ,   empty.at[3, 1:4].set(True)
+            ,   empty.at[3, 0:3].set(True)
+            ], [empty.at[1:4, 3].set(True).at[3, 1:3].set(True)
+            ,   empty.at[1:4, 0].set(True).at[3, 1:3].set(True)
+            ,   empty.at[0:3, 3].set(True).at[0, 1:3].set(True)
+            ,   empty.at[0:3, 0].set(True).at[0, 1:3].set(True)
+            ]  ]
+        # TODO: jnp.kron then jnp.reduce_or with 2 padding on each input's axes
+        #       The first matrix in kron should be fully determined by pyramids
+
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(
         jax.tree_util.register_dataclass,

@@ -13,12 +13,13 @@ im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "m2_out8.npy")
 if __name__ == "__main__":
     im = im4
     bins = im.depth.binned()
-    levels = Seives(bins)
-    print(levels.offsets)
-
-    import matplotlib.pyplot as plt
-    plt.imshow(levels.pyramids[0])
-    plt.show()
+    levels = Seives(bins, 3)
+    levels.tmp()
+    # print(levels.offsets)
+    #
+    # import matplotlib.pyplot as plt
+    # plt.imshow(levels.pyramids[0])
+    # plt.show()
 
 exit(0)
 if __name__ == "__main__":
