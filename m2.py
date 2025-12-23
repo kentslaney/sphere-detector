@@ -13,8 +13,8 @@ im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "m2_out8.npy")
 if __name__ == "__main__":
     im = im4
     bins = im.depth.binned()
-    levels = Seives(bins, 3)
-    levels.tmp()
+    levels = Seives(bins)
+    print(levels.ruler_0th)
     # print(levels.offsets)
     #
     # import matplotlib.pyplot as plt

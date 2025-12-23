@@ -236,7 +236,6 @@ class Depth(object):
     def masked(self):
         return jnp.where(self.inwards[..., None], self.centers, -1)
 
-    @jax.jit
     def binned(self):
         centers = self.masked.reshape(-1, 2)
         indices = Casts2d(self.depth.shape, self.masked)
@@ -364,6 +363,11 @@ class Bounds(object):
         return self.origin[None, None] + \
                 self.scale * self.coord + self.scale // 2
 
+    @property
+    def valid_conv_pad(self):
+        assert self.scale > 1
+        return tuple((i - 1) % 2 for i in self.upscale)
+
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["bounds", "center_0th", "center_1st", "radius"],
@@ -380,6 +384,10 @@ class Bins(object):
     def counts(self):
         return self.bounds.counts
 
+    @property
+    def shape(self):
+        return self.counts.shape
+
     def sifted(self):
         bounds = self.bounds.sifted()
         return __class__(
@@ -395,8 +403,8 @@ class Bins(object):
         primary_0th = self.center_0th.mean(self.counts) > centers[..., 0]
         primary_1st = self.center_1st.mean(self.counts) > centers[..., 1]
         alternating = jnp.array([True, False])
-        alternating_0th = jnp.tile(alternating[:, None], self.counts.shape)
-        alternating_1st = jnp.tile(alternating[None, :], self.counts.shape)
+        alternating_0th = jnp.tile(alternating[:, None], self.shape)
+        alternating_1st = jnp.tile(alternating[None, :], self.shape)
         _0th = jnp.logical_xor(jnp.repeat(primary_0th, 2, 0), alternating_0th)
         _1st = jnp.logical_xor(jnp.repeat(primary_1st, 2, 1), alternating_1st)
         return jnp.logical_and(jnp.repeat(_0th, 2, 1), jnp.repeat(_1st, 2, 0))
@@ -417,7 +425,8 @@ class Bins(object):
         return arr
 
     def pyramids(self, init=None):
-        inc = jnp.ones_like(self.counts) if init is None else init + 1
+        inc = jnp.ones_like(self.counts, dtype=jnp.int32) if init is None \
+                else init + 1
         upscaled = jnp.repeat(jnp.repeat(inc, 2, 0), 2, 1)
         return self.unshift(upscaled * self.primaries)
 
@@ -436,9 +445,33 @@ class Seives(object):
             out.append(out[-1].sifted())
         self.stack = tuple(out)
 
+    def ruler(self, axis): # OEIS A001511
+        up = jnp.ones(self.stack[-1].shape[axis] + 3, dtype=jnp.int32)
+        out, pre, post = ([], []), 1, -2
+        for cur in self.stack[:0:-1]:
+            pad_left = cur.bounds.offset[axis]
+            pre = 2 * pre - pad_left
+            post = 2 * post + 1 + cur.bounds.valid_conv_pad[axis] - pad_left
+            assert cur.bounds.upscale[axis] == 2 * up.size - pre + post
+
+            out[0].append(up[(-pre // 2) - 1:(-post // 2) - 1:-1])
+            out[1].append(up[pre // 2:post // 2])
+            assert cur.bounds.upscale[axis] == out[0][-1].size + out[1][-1].size
+
+            # combined = jnp.ravel(jnp.column_stack((up[::-1], up)))[pre:post]
+            # assert jnp.all(out[0][-1] == combined[pre % 2::2])
+            # assert jnp.all(out[1][-1] == combined[(pre + 1) % 2::2])
+
+            up = jnp.ravel(jnp.column_stack((jnp.ones_like(up), up + 1)))
+        return tuple(tuple(i[::-1]) for i in out)
+
     @cached_property
-    def offsets(self):
-        return jnp.vstack(tuple(i.bounds.offset for i in self.stack))
+    def ruler_0th(self):
+        return self.ruler(0)
+
+    @cached_property
+    def ruler_1st(self):
+        return self.ruler(1)
 
     @cached_property
     def pyramids(self):
@@ -448,7 +481,8 @@ class Seives(object):
             out.append(cur)
         return tuple(out[::-1])
 
-    def nms(self):
+    def nms(self, level):
+        assert 0 < level < len(self.stack)
         # Only primaries can be candidates, subject to the filter:
         #     Primaries block out 1 level down surroundings
         #         whose common ancestor
@@ -459,21 +493,30 @@ class Seives(object):
             ,   empty.at[0, 3].set(True)
             ,   empty.at[3, 0].set(True)
             ,   empty.at[3, 3].set(True)
-            ], [empty.at[1:4, 0].set(True)
-            ,   empty.at[1:4, 3].set(True)
-            ,   empty.at[0:3, 0].set(True)
-            ,   empty.at[0:3, 3].set(True)
             ], [empty.at[0, 1:4].set(True)
             ,   empty.at[0, 0:3].set(True)
             ,   empty.at[3, 1:4].set(True)
             ,   empty.at[3, 0:3].set(True)
+            ], [empty.at[1:4, 0].set(True)
+            ,   empty.at[1:4, 3].set(True)
+            ,   empty.at[0:3, 0].set(True)
+            ,   empty.at[0:3, 3].set(True)
             ], [empty.at[1:4, 3].set(True).at[3, 1:3].set(True)
             ,   empty.at[1:4, 0].set(True).at[3, 1:3].set(True)
             ,   empty.at[0:3, 3].set(True).at[0, 1:3].set(True)
             ,   empty.at[0:3, 0].set(True).at[0, 1:3].set(True)
             ]  ]
-        # TODO: jnp.kron then jnp.reduce_or with 2 padding on each input's axes
+        # TODO: jnp.kron then jnp.reduce_or with 2 sliced on each input's axes
         #       The first matrix in kron should be fully determined by pyramids
+        #           and offset
+        strided = [
+                self.stack[level].primaries[0::2, 0::2],
+                self.stack[level].primaries[0::2, 1::2],
+                self.stack[level].primaries[1::2, 0::2],
+                self.stack[level].primaries[1::2, 1::2]]
+        out = [[]]
+        for a, b in zip(strided, kernels[3]):
+            out[0][0].append(jnp.kron(a, b))
 
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(
