@@ -14,15 +14,14 @@ if __name__ == "__main__":
     im = im4
     bins = im.depth.binned()
     levels = Seives.create(bins)
-    mask = [levels.nms(i) for i in range(1, len(levels.stack) - 1)]
+    mask = [levels.nms(i) for i in range(1, len(levels.stack))]
     print([i.shape for i in levels.stack])
-    print([i.primaries.shape for i in levels.stack[1:]])
     print([i.shape for i in mask])
 
     # import matplotlib.pyplot as plt
     # fig, ax = plt.subplots(1, 2)
     # i = 2
-    # ax[0].imshow(levels.stack[i + 2].primaries)
+    # ax[0].imshow(levels.stack[i + 1].primaries)
     # ax[1].imshow(mask[i])
     # plt.show()
 

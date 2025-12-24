@@ -486,11 +486,13 @@ class Seives(object):
 
     # @jax.jit(static_argnames=["level"])
     def nms(self, level):
-        assert 0 < level < len(self.stack) - 1
+        assert 0 < level < len(self.stack), "layer must store primaries"
         # Only primaries can be candidates, subject to the filter:
         #     Primaries block out 1 level down surroundings
         #         whose common ancestor
         #             is a primary or is the first non-primary in the path
+        if level == len(self.stack) - 1:
+            return self.stack[level].unshift(self.stack[level].primaries)
         empty = jnp.zeros((4, 4), dtype=jnp.bool)
         kernels = \
             [  [empty.at[0, 0].set(True)
@@ -556,7 +558,10 @@ class Seives(object):
         reduced = jnp.logical_or(
                 jnp.logical_or(reduced_1st[0], reduced_1st[3]),
                 jnp.logical_or(reduced_1st[1], reduced_1st[2]))
-        return self.stack[level + 1].unshift(reduced, 2)
+        suppressions = self.stack[level + 1].unshift(reduced, 2)
+        allowed = jnp.logical_not(suppressions)
+        candidates = jnp.logical_and(self.stack[level].primaries, allowed)
+        return self.stack[level].unshift(candidates)
 
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(
