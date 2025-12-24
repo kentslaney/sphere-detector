@@ -453,19 +453,17 @@ class Seives(object):
         return cls(tuple(out))
 
     def ruler(self, axis): # OEIS A001511
-        up = jnp.ones(self.stack[-1].shape[axis] + 3, dtype=jnp.int32)
-        out, pre, post = ([], []), 1, -2
+        up = jnp.ones(self.stack[-1].shape[axis] + 4, dtype=jnp.int32)
+        out, pre = ([], []), 2
         for cur in self.stack[:0:-1]:
-            shifted = jax.lax.dynamic_slice(up, (pre,), (cur.shape[axis],))
-            out[0].append(shifted[::-1])
+            shape = (cur.shape[axis],)
+            shifted = jax.lax.dynamic_slice(up, (pre,), shape)
+            flipped = jax.lax.dynamic_slice(up[::-1], (pre,), shape)
+            out[0].append(flipped)
             out[1].append(shifted)
 
             up = jnp.ravel(jnp.column_stack((jnp.ones_like(up), up + 1)))
-
-            pad_left = cur.bounds.offset[axis]
-            pre = 2 * pre - pad_left
-            post = 2 * post + 1 + cur.bounds.valid_conv_pad[axis] - pad_left
-            # assert cur.bounds.upscale[axis] == up.size - pre + post
+            pre = 2 * pre - cur.bounds.offset[axis]
         return tuple(tuple(i[::-1]) for i in out)
 
     @cached_property
