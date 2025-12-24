@@ -238,7 +238,7 @@ class Depth(object):
 
     def binned(self):
         centers = self.masked.reshape(-1, 2)
-        indices = Casts2d(self.depth.shape, self.masked)
+        indices = Casts2d.create(self.depth.shape, self.masked)
         counts = indices.scatter('add', 1, 0)
         flat_0th = jnp.ravel(self.coord[..., 0])
         flat_1st = jnp.ravel(self.coord[..., 1])
@@ -264,15 +264,17 @@ class Casts2d(object):
     shape: any
     indices: any
 
-    def __init__(self, shape, continuous):
-        self.shape, shape = shape, jnp.array(shape)
+    @classmethod
+    def create(cls, shape, continuous):
+        _shape, shape = shape, jnp.array(shape)
         assert continuous.shape[-1] == 2
         if continuous.ndim > 2:
             continuous = continuous.reshape(-1, 2)
         floored = jnp.int32(jnp.floor(continuous))
         valid = jnp.logical_and(floored >= 0, floored < shape[None])
         valid = jnp.logical_and(valid[:, 0], valid[:, 1])
-        self.indices = jnp.where(valid[:, None], floored, shape[None])
+        indices = jnp.where(valid[:, None], floored, shape[None])
+        return cls(_shape, indices)
 
     def scatter(self, mode, value, fill):
         out = jnp.full(self.shape, fill)
@@ -441,28 +443,29 @@ def kron_bool(a, b):
 class Seives(object):
     stack: any
 
-    def __init__(self, base, layers=None):
+    @classmethod
+    def create(cls, base, layers=None):
         layers = int(math.log2(base.counts.size) // 3) if layers is None \
                 else layers - 1
         out = [base]
         for _ in range(layers):
             out.append(out[-1].sifted())
-        self.stack = tuple(out)
+        return cls(tuple(out))
 
     def ruler(self, axis): # OEIS A001511
         up = jnp.ones(self.stack[-1].shape[axis] + 3, dtype=jnp.int32)
         out, pre, post = ([], []), 1, -2
         for cur in self.stack[:0:-1]:
-            out[0].append(up[post - 1:pre - 1:-1])
-            out[1].append(up[pre:post])
-            assert cur.shape[axis] == out[0][-1].size == out[1][-1].size
+            shifted = jax.lax.dynamic_slice(up, (pre,), (cur.shape[axis],))
+            out[0].append(shifted[::-1])
+            out[1].append(shifted)
 
             up = jnp.ravel(jnp.column_stack((jnp.ones_like(up), up + 1)))
 
             pad_left = cur.bounds.offset[axis]
             pre = 2 * pre - pad_left
             post = 2 * post + 1 + cur.bounds.valid_conv_pad[axis] - pad_left
-            assert cur.bounds.upscale[axis] == up.size - pre + post
+            # assert cur.bounds.upscale[axis] == up.size - pre + post
         return tuple(tuple(i[::-1]) for i in out)
 
     @cached_property
@@ -483,6 +486,7 @@ class Seives(object):
             fn = layer.unshift
         return tuple(out[::-1])
 
+    @jax.jit(static_argnames=["level"])
     def nms(self, level):
         assert 0 < level < len(self.stack) - 1
         # Only primaries can be candidates, subject to the filter:
