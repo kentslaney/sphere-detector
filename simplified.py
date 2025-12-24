@@ -489,8 +489,9 @@ class Seives(object):
         assert 0 < level < len(self.stack), "layer must store primaries"
         # Only primaries can be candidates, subject to the filter:
         #     Primaries block out 1 level down surroundings
-        #         whose common ancestor
-        #             is a primary or is the first non-primary in the path
+        #         if the primary's upwards path to the common ancestor
+        #             is all primaries
+        #             or the the common ancestor is the first non-primary
         if level == len(self.stack) - 1:
             return self.stack[level].unshift(self.stack[level].primaries)
         empty = jnp.zeros((4, 4), dtype=jnp.bool)
