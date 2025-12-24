@@ -148,11 +148,12 @@ class Raster:
     def draw_candidates(self, ax):
         import matplotlib.patches as patches
         ax.imshow(self.cropped())
-        _, bboxes = self.depth.binned().nominate()
+        confidences, stats = Seives.create(self.depth.binned()).nominate()
+        # print(confidences)
         kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
-        for i in jnp.unstack(bboxes):
-            rect = patches.Rectangle(i[1::-1], *(i[:1:-1] - i[1::-1]), **kw)
-            ax.add_patch(rect)
+        for y, x, r, _, _, _ in jnp.unstack(stats):
+            overlay = patches.Circle((x, y), r, **kw)
+            ax.add_patch(overlay)
         return ax
 
 @partial(
@@ -571,6 +572,18 @@ class Seives(object):
         allowed = jnp.logical_not(suppressions)
         candidates = jnp.logical_and(self.stack[level].primaries, allowed)
         return self.stack[level].unshift(candidates)
+
+    @jax.jit(static_argnames=['candidates'])
+    def nominate(self, candidates=16):
+        values = jnp.ravel(self.stack[-1].bounds.metric)
+        stats = self.stack[-1].stat().reshape(-1, 6)
+        suppressors = range(len(self.stack) - 1, 0, -1)
+        for i, layer in zip(suppressors, self.stack[-2::-1]):
+            nominees = jnp.where(self.nms(i), layer.bounds.metric, 0)
+            values = jnp.concatenate((values, jnp.ravel(nominees)))
+            stats = jnp.concatenate((stats, layer.stat().reshape(-1, 6)))
+        values, indices = jax.lax.top_k(values, candidates)
+        return values, stats[indices]
 
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(
