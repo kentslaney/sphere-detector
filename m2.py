@@ -14,7 +14,10 @@ if __name__ == "__main__":
     im = im4
     bins = im.depth.binned()
     levels = Seives(bins)
-    print(levels.nms(1))
+    mask = [levels.nms(i) for i in range(1, len(levels.stack) - 1)]
+    print([i.shape for i in levels.stack])
+    print([i.primaries.shape for i in levels.stack[1:]])
+    print([i.shape for i in mask])
     # print(levels.offsets)
     #
     # import matplotlib.pyplot as plt

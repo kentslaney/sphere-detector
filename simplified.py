@@ -411,8 +411,9 @@ class Bins(object):
 
     def unshift(self, arr, fill=None):
         fill = jnp.zeros((), dtype=arr.dtype) if fill is None else fill
-        full = lambda i, n: jnp.full(
-                (arr.shape[:i] + (n,) + arr.shape[i + 1:]), fill)
+        def full(i, n):
+            assert 0 <= n <= 2, f"padded {n}; more than expected"
+            return jnp.full((arr.shape[:i] + (n,) + arr.shape[i + 1:]), fill)
         for i, prefix in enumerate(self.bounds.offset):
             arr = jax.lax.cond(
                     prefix == 1,
@@ -428,7 +429,7 @@ class Bins(object):
         inc = jnp.ones_like(self.counts, dtype=jnp.int32) if init is None \
                 else init + 1
         upscaled = jnp.repeat(jnp.repeat(inc, 2, 0), 2, 1)
-        return self.unshift(upscaled * self.primaries)
+        return upscaled * self.primaries
 
 def kron_bool(a, b):
     return jnp.bool(jnp.kron(jnp.uint8(a), jnp.uint8(b)))
@@ -452,20 +453,16 @@ class Seives(object):
         up = jnp.ones(self.stack[-1].shape[axis] + 3, dtype=jnp.int32)
         out, pre, post = ([], []), 1, -2
         for cur in self.stack[:0:-1]:
+            out[0].append(up[post - 1:pre - 1:-1])
+            out[1].append(up[pre:post])
+            assert cur.shape[axis] == out[0][-1].size == out[1][-1].size
+
+            up = jnp.ravel(jnp.column_stack((jnp.ones_like(up), up + 1)))
+
             pad_left = cur.bounds.offset[axis]
             pre = 2 * pre - pad_left
             post = 2 * post + 1 + cur.bounds.valid_conv_pad[axis] - pad_left
-            assert cur.bounds.upscale[axis] == 2 * up.size - pre + post
-
-            out[0].append(up[(-pre // 2) - 1:(-post // 2) - 1:-1])
-            out[1].append(up[pre // 2:post // 2])
-            assert cur.bounds.upscale[axis] == out[0][-1].size + out[1][-1].size
-
-            # combined = jnp.ravel(jnp.column_stack((up[::-1], up)))[pre:post]
-            # assert jnp.all(out[0][-1] == combined[pre % 2::2])
-            # assert jnp.all(out[1][-1] == combined[(pre + 1) % 2::2])
-
-            up = jnp.ravel(jnp.column_stack((jnp.ones_like(up), up + 1)))
+            assert cur.bounds.upscale[axis] == up.size - pre + post
         return tuple(tuple(i[::-1]) for i in out)
 
     @cached_property
@@ -479,14 +476,15 @@ class Seives(object):
     @cached_property
     def pyramids(self):
         cur, out = None, []
+        fn = lambda x: x
         for layer in self.stack[:0:-1]:
-            cur = layer.pyramids(cur)
+            cur = layer.pyramids(fn(cur))
             out.append(cur)
+            fn = layer.unshift
         return tuple(out[::-1])
 
     def nms(self, level):
-        assert 0 <= level < len(self.stack) - 1
-        parent = level + 1
+        assert 0 < level < len(self.stack) - 1
         # Only primaries can be candidates, subject to the filter:
         #     Primaries block out 1 level down surroundings
         #         whose common ancestor
@@ -510,17 +508,15 @@ class Seives(object):
             ,   empty.at[0:3, 3].set(True).at[0, 1:3].set(True)
             ,   empty.at[0:3, 0].set(True).at[0, 1:3].set(True)
             ]  ]
-        starts = [(0, 0), (0, 1), (1, 0), (1, 1)]
-        offsets = self.stack[level].bounds.offset
-        starts = [
-                [1 - offsets[i] if j else offsets[i] for i, j in enumerate(x)]
-                for x in starts]
-        strides = [(slice(i, None, 2), slice(j, None, 2)) for i, j in starts]
-        unshifted = self.stack[parent].unshift(self.stack[parent].primaries)
+        strides = [
+                (slice(0, None, 2), slice(0, None, 2)),
+                (slice(0, None, 2), slice(1, None, 2)),
+                (slice(1, None, 2), slice(0, None, 2)),
+                (slice(1, None, 2), slice(1, None, 2))]
         masks = [None] * 3
         out = ([], [], [], [])
         for a, b in zip(strides, kernels[3]):
-            out[3].append(kron_bool(unshifted[a], b))
+            out[3].append(kron_bool(self.stack[level + 1].primaries[a], b))
         mask1lo   = self.ruler_0th[0][level][:, None]
         mask1hi   = self.ruler_0th[1][level][:, None]
         masks[1] = [mask1lo, mask1lo, mask1hi, mask1hi]
@@ -533,16 +529,28 @@ class Seives(object):
                 (self.ruler_0th[1][level], self.ruler_1st[0][level]),
                 (self.ruler_0th[1][level], self.ruler_1st[1][level])]
         masks[0] = [jax.lax.max(*jnp.meshgrid(x, y)) for y, x in mask0prod]
-        for i, (mask, kernel) in enumerate(zip(masks, kernels[:2])):
+        for i, (mask, kernel) in enumerate(zip(masks, kernels[:3])):
             for bound, a, b in zip(mask, strides, kernel):
                 mask = self.pyramids[level][a] >= bound
-                mask = jnp.logical_and(mask, unshifted[a])
+                mask = jnp.logical_and(mask, self.stack[level + 1].primaries[a])
                 out[i].append(kron_bool(mask, b))
         reduced_1st = []
         for ll, lh, hl, hh in out:
+            ll = jnp.concatenate((ll[1:, :], jnp.zeros((1, ll.shape[1]))), 0)
+            ll = jnp.concatenate((ll[:, 1:], jnp.zeros((ll.shape[0], 1))), 1)
+
+            lh = jnp.concatenate((lh[1:, :], jnp.zeros((1, lh.shape[1]))), 0)
+            lh = jnp.concatenate((jnp.zeros((lh.shape[0], 1)), lh[:, :-1]), 1)
+
+            hl = jnp.concatenate((jnp.zeros((1, hl.shape[1])), hl[:-1, :]), 0)
+            hl = jnp.concatenate((hl[:, 1:], jnp.zeros((hl.shape[0], 1))), 1)
+
+            hh = jnp.concatenate((jnp.zeros((1, hh.shape[1])), hh[:-1, :]), 0)
+            hh = jnp.concatenate((jnp.zeros((hh.shape[0], 1)), hh[:, :-1]), 1)
+
             reduced_1st.append(jnp.logical_or(
-                jnp.logical_or(ll[2:, 2:], hh[:-2, :-2]),
-                jnp.logical_or(lh[2:, :-2], hl[:-2, 2:])))
+                jnp.logical_or(ll, hh),
+                jnp.logical_or(lh, hl)))
         return jnp.logical_or(
                 jnp.logical_or(reduced_1st[0], reduced_1st[3]),
                 jnp.logical_or(reduced_1st[1], reduced_1st[2]))
