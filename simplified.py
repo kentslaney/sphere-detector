@@ -330,6 +330,11 @@ class Bounds(object):
 
     @cached_property
     def metric(self):
+        areas, total = self.area(), self.counts.size
+        alpha, beta = 1.5, 0.1
+        return (self.counts ** beta) / (
+                areas + alpha * total * self.scale ** 2) / (
+                self.scale ** 2)
         # counts ~ area
         # counts ** 1.5 / area / sqrt(scale) ~ sqrt(area / scale)
         # which is resolution invariant
