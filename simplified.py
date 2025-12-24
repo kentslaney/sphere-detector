@@ -433,7 +433,15 @@ class Bins(object):
         upscaled = jnp.repeat(jnp.repeat(inc, 2, 0), 2, 1)
         return upscaled * self.primaries
 
+    # mean(row) mean(col) mean(radius) var(row) var(col) var(radius)
+    def stat(self):
+        out = []
+        for i in (self.center_0th, self.center_1st, self.radius):
+            out.append(i.stat(self.counts))
+        return jnp.stack(sum(zip(*out), ()), axis=-1)
+
 def kron_bool(a, b):
+    # TODO: logical_and via broadcasting then reshape to result
     return jnp.bool(jnp.kron(jnp.uint8(a), jnp.uint8(b)))
 
 @partial(

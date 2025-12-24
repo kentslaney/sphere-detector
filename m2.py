@@ -13,6 +13,8 @@ im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "m2_out8.npy")
 if __name__ == "__main__":
     im = im4
     bins = im.depth.binned()
+    print(bins.stat())
+    exit(0)
     levels = Seives.create(bins)
     mask = [levels.nms(i) for i in range(1, len(levels.stack))]
     print([i.shape for i in levels.stack])
