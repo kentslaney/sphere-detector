@@ -411,21 +411,21 @@ class Bins(object):
         _1st = jnp.logical_xor(jnp.repeat(primary_1st, 2, 1), alternating_1st)
         return jnp.logical_and(jnp.repeat(_0th, 2, 1), jnp.repeat(_1st, 2, 0))
 
-    def unshift(self, arr, fill=None):
-        fill = jnp.zeros((), dtype=arr.dtype) if fill is None else fill
-        def full(i, n):
-            assert 0 <= n <= 2, f"padded {n}; more than expected"
-            return jnp.full((arr.shape[:i] + (n,) + arr.shape[i + 1:]), fill)
+    def unshift(self, x, n=1, fill=None):
+        fill = jnp.zeros((), dtype=x.dtype) if fill is None else fill
+        def full(i, m):
+            assert 0 <= m <= 2, f"padded {m}; more than expected"
+            return jnp.full((x.shape[:i] + (n * m,) + x.shape[i + 1:]), fill)
         for i, prefix in enumerate(self.bounds.offset):
-            arr = jax.lax.cond(
+            x = jax.lax.cond(
                     prefix == 1,
-                    lambda: jnp.concat((full(i, 1), arr), axis=i),
-                    lambda: jnp.concat((arr, full(i, 1)), axis=i))
-            arr = jnp.concat(
-                    (arr, full(i, self.bounds.upscale[i] - arr.shape[i])),
+                    lambda: jnp.concat((full(i, 1), x), axis=i),
+                    lambda: jnp.concat((x, full(i, 1)), axis=i))
+            x = jnp.concat(
+                    (x, full(i, self.bounds.upscale[i] - x.shape[i] // n)),
                     axis=i)
-        assert arr.shape[:2] == self.bounds.upscale[:2]
-        return arr
+        assert x.shape[:2] == tuple(i * n for i in self.bounds.upscale[:2])
+        return x
 
     def pyramids(self, init=None):
         inc = jnp.ones_like(self.counts, dtype=jnp.int32) if init is None \
@@ -484,7 +484,7 @@ class Seives(object):
             fn = layer.unshift
         return tuple(out[::-1])
 
-    @jax.jit(static_argnames=["level"])
+    # @jax.jit(static_argnames=["level"])
     def nms(self, level):
         assert 0 < level < len(self.stack) - 1
         # Only primaries can be candidates, subject to the filter:
@@ -553,9 +553,10 @@ class Seives(object):
             reduced_1st.append(jnp.logical_or(
                 jnp.logical_or(ll, hh),
                 jnp.logical_or(lh, hl)))
-        return jnp.logical_or(
+        reduced = jnp.logical_or(
                 jnp.logical_or(reduced_1st[0], reduced_1st[3]),
                 jnp.logical_or(reduced_1st[1], reduced_1st[2]))
+        return self.stack[level + 1].unshift(reduced, 2)
 
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(

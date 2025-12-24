@@ -19,12 +19,12 @@ if __name__ == "__main__":
     print([i.primaries.shape for i in levels.stack[1:]])
     print([i.shape for i in mask])
 
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(1, 2)
-    i = 2
-    ax[0].imshow(levels.stack[i + 2].primaries)
-    ax[1].imshow(mask[i])
-    plt.show()
+    # import matplotlib.pyplot as plt
+    # fig, ax = plt.subplots(1, 2)
+    # i = 2
+    # ax[0].imshow(levels.stack[i + 2].primaries)
+    # ax[1].imshow(mask[i])
+    # plt.show()
 
 exit(0)
 if __name__ == "__main__":
