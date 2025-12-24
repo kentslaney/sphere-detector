@@ -430,6 +430,9 @@ class Bins(object):
         upscaled = jnp.repeat(jnp.repeat(inc, 2, 0), 2, 1)
         return self.unshift(upscaled * self.primaries)
 
+def kron_bool(a, b):
+    return jnp.bool(jnp.kron(jnp.uint8(a), jnp.uint8(b)))
+
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["stack"], meta_fields=[])
@@ -482,7 +485,8 @@ class Seives(object):
         return tuple(out[::-1])
 
     def nms(self, level):
-        assert 0 < level < len(self.stack)
+        assert 0 <= level < len(self.stack) - 1
+        parent = level + 1
         # Only primaries can be candidates, subject to the filter:
         #     Primaries block out 1 level down surroundings
         #         whose common ancestor
@@ -506,17 +510,42 @@ class Seives(object):
             ,   empty.at[0:3, 3].set(True).at[0, 1:3].set(True)
             ,   empty.at[0:3, 0].set(True).at[0, 1:3].set(True)
             ]  ]
-        # TODO: jnp.kron then jnp.reduce_or with 2 sliced on each input's axes
-        #       The first matrix in kron should be fully determined by pyramids
-        #           and offset
-        strided = [
-                self.stack[level].primaries[0::2, 0::2],
-                self.stack[level].primaries[0::2, 1::2],
-                self.stack[level].primaries[1::2, 0::2],
-                self.stack[level].primaries[1::2, 1::2]]
-        out = [[]]
-        for a, b in zip(strided, kernels[3]):
-            out[0][0].append(jnp.kron(a, b))
+        starts = [(0, 0), (0, 1), (1, 0), (1, 1)]
+        offsets = self.stack[level].bounds.offset
+        starts = [
+                [1 - offsets[i] if j else offsets[i] for i, j in enumerate(x)]
+                for x in starts]
+        strides = [(slice(i, None, 2), slice(j, None, 2)) for i, j in starts]
+        unshifted = self.stack[parent].unshift(self.stack[parent].primaries)
+        masks = [None] * 3
+        out = ([], [], [], [])
+        for a, b in zip(strides, kernels[3]):
+            out[3].append(kron_bool(unshifted[a], b))
+        mask1lo   = self.ruler_0th[0][level][:, None]
+        mask1hi   = self.ruler_0th[1][level][:, None]
+        masks[1] = [mask1lo, mask1lo, mask1hi, mask1hi]
+        mask2even = self.ruler_1st[0][level][None, :]
+        mask2odd  = self.ruler_1st[1][level][None, :]
+        masks[2] = [mask2even, mask2odd, mask2even, mask2odd]
+        mask0prod = [
+                (self.ruler_0th[0][level], self.ruler_1st[0][level]),
+                (self.ruler_0th[0][level], self.ruler_1st[1][level]),
+                (self.ruler_0th[1][level], self.ruler_1st[0][level]),
+                (self.ruler_0th[1][level], self.ruler_1st[1][level])]
+        masks[0] = [jax.lax.max(*jnp.meshgrid(x, y)) for y, x in mask0prod]
+        for i, (mask, kernel) in enumerate(zip(masks, kernels[:2])):
+            for bound, a, b in zip(mask, strides, kernel):
+                mask = self.pyramids[level][a] >= bound
+                mask = jnp.logical_and(mask, unshifted[a])
+                out[i].append(kron_bool(mask, b))
+        reduced_1st = []
+        for ll, lh, hl, hh in out:
+            reduced_1st.append(jnp.logical_or(
+                jnp.logical_or(ll[2:, 2:], hh[:-2, :-2]),
+                jnp.logical_or(lh[2:, :-2], hl[:-2, 2:])))
+        return jnp.logical_or(
+                jnp.logical_or(reduced_1st[0], reduced_1st[3]),
+                jnp.logical_or(reduced_1st[1], reduced_1st[2]))
 
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(

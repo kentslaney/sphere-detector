@@ -14,7 +14,7 @@ if __name__ == "__main__":
     im = im4
     bins = im.depth.binned()
     levels = Seives(bins)
-    print(levels.ruler_0th)
+    print(levels.nms(1))
     # print(levels.offsets)
     #
     # import matplotlib.pyplot as plt

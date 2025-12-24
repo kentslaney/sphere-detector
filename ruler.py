@@ -1,6 +1,6 @@
 # for interior corners: always
-# for exterior corners: max meshgrid >= pyramids
-# for exterior borders: meshgrid >= pyramids
+# for exterior corners: max meshgrid < pyramids
+# for exterior borders: meshgrid < pyramids
 
 # for max direction (N/A at top level; no primaries)
 #... |                               | ...
