@@ -447,8 +447,9 @@ class Bins(object):
         return jnp.stack(sum(zip(*out), ()), axis=-1)
 
 def kron_bool(a, b):
-    # TODO: logical_and via broadcasting then reshape to result
-    return jnp.bool(jnp.kron(jnp.uint8(a), jnp.uint8(b)))
+    assert a.ndim == 2 and b.ndim == 2
+    return jnp.logical_and(a[:, None, :, None], b[None, :, None, :]).reshape(
+            a.shape[0] * b.shape[0], a.shape[1] * b.shape[1])
 
 @partial(
         jax.tree_util.register_dataclass,
