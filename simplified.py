@@ -83,10 +83,35 @@ class Da2:
         import numpy as np
         return jnp.array(self.model.infer_image(np.array(im)))
 
+class Da3:
+    def __init__(self, encoder="depth-anything/da3mono-large"):
+        self.encoder = encoder
+
+    @cached_property
+    def model(self):
+        import torch
+        sys.path.insert(0, str(local / "assets" / "depth_anything_v3" / "src"))
+        from depth_anything_3.api import DepthAnything3
+        sys.path.pop(0)
+
+        DEVICE = 'cuda' if torch.cuda.is_available() else \
+                'mps' if torch.backends.mps.is_available() else 'cpu'
+
+        model = DepthAnything3.from_pretrained(self.encoder)
+        return model.to(DEVICE)
+
+    def __call__(self, im):
+        import numpy as np
+        # TODO: cache full prediction object and use intrinsics, extrinsics
+        im = np.array(im)
+        out = self.model.inference([im])
+        #, export_dir="cache", export_format="npz")
+        return jnp.array(out.depth[0])
+
 class Raster:
     rng = [jax.random.key(0)]
     key = None
-    model = Da2('vits')
+    model = Da3()
     target = None
     f_35mm = None
 
@@ -648,7 +673,7 @@ class Perspective(Raster):
 
 class M2(Perspective):
     target = (392, 518)  # coremltools benchmark resolution
-    f_35mm = 18
+    # f_35mm = 18
 
 class Demo(Perspective):  # Logitech Webcam C925e
     target = (1080, 1920)

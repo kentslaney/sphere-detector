@@ -1,6 +1,6 @@
 [submodule "assets/depth_anything_v2"]
 	path = assets/depth_anything_v2
-	url = https://github.com/DepthAnything/Depth-Anything-V2
+	url = https://github.com/DepthAnything/Depth-Anything-V2.git
 [submodule "assets/coreml_depth_anything_v2_small"]
 	path = assets/coreml_depth_anything_v2_small
 	url = https://huggingface.co/apple/coreml-depth-anything-v2-small
@@ -10,3 +10,6 @@
 [submodule "assets/coremltools"]
 	path = assets/coremltools
 	url = git@github.com:kentslaney/coremltools
+[submodule "assets/depth_anything_v3"]
+	path = assets/depth_anything_v3
+	url = https://github.com/ByteDance-Seed/Depth-Anything-3.git
