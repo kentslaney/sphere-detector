@@ -174,7 +174,7 @@ class Depth(object):
         return jnp.stack((y, x), -1)
 
     @staticmethod
-    def scharr(arr):
+    def sobel(arr):
         kernel = [[-47, -162, -47], [0, 0, 0], [47, 162, 47]]
         l1 = sum(map(abs, sum(kernel, [])))
         kernel = jnp.array(kernel) / l1
@@ -193,13 +193,13 @@ class Depth(object):
 
     @cached_property
     def grad(self):
-        return self.scharr(self.depth)
+        return self.sobel(self.depth)
 
     @cached_property
     def hessian(self):
         return jnp.stack((
-                self.scharr(self.grad[..., 0]),
-                self.scharr(self.grad[..., 1])), -1)
+                self.sobel(self.grad[..., 0]),
+                self.sobel(self.grad[..., 1])), -1)
 
     @cached_property
     def rotated(self):
@@ -324,7 +324,8 @@ class Bounds(object):
                 self.origin, self.offset, self.upscale)
 
     def area(self):
-        hi = self.bounds[..., 2:] + (self.bounds[..., 2:] < 0)
+        hi = jax.lax.max(self.bounds[..., :2], self.bounds[..., 2:]) + (
+                self.bounds[..., 2:] >= 0)
         y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
         return jnp.int32(y) * x
 
