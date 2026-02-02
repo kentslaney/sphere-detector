@@ -597,28 +597,23 @@ class Seives(object):
         values, indices = jax.lax.top_k(values, candidates)
         return values, indices
 
-    @cached_property
-    def bounds(self):
-        boundaries = self.stack[-1].bounds.bounds.reshape(-1, 4)
-        for layer in self.stack[-2::-1]:
-            boundaries = jnp.concatenate(
-                    (boundaries, layer.bounds.bounds.reshape(-1, 4)))
-        return boundaries
+    def flattened(self, f):
+        res = None
+        for layer in self.stack[-1::-1]:
+            adding = f(layer).reshape(layer.counts.size, -1)
+            if res is None:
+                res = adding
+            else:
+                res = jnp.concatenate((res, adding))
+        return res
 
     def bound(self, candidates):
         values, indices = self.nominate(candidates)
-        return values, self.bounds[indices]
-
-    @cached_property
-    def stats(self):
-        stats = self.stack[-1].stat().reshape(-1, 6)
-        for layer in self.stack[-2::-1]:
-            stats = jnp.concatenate((stats, layer.stat().reshape(-1, 6)))
-        return stats
+        return values, self.flattened(lambda x: x.bounds.bounds)[indices]
 
     def stat(self, candidates):
         values, indices = self.nominate(candidates)
-        return values, self.stats[indices]
+        return values, self.flattened(lambda x: x.stat())[indices]
 
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(
