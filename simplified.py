@@ -509,8 +509,6 @@ class Seives(object):
 
     # @jax.jit(static_argnames=["level"])
     def nms(self, level):
-        # TODO
-        return True
         assert 0 < level < len(self.stack), "layer must store primaries"
         # Only primaries can be candidates, subject to the filter:
         #     Primaries block out 1 level down surroundings
@@ -590,28 +588,37 @@ class Seives(object):
         return self.stack[level].unshift(candidates)
 
     @jax.jit(static_argnames=['candidates'])
-    def bound(self, candidates=16):
+    def nominate(self, candidates=16):
         values = jnp.ravel(self.stack[-1].bounds.metric)
-        boundaries = self.stack[-1].bounds.bounds.reshape(-1, 4)
-        for layer in self.stack[-2::-1]:
-            nominees = layer.bounds.metric
-            values = jnp.concatenate((values, jnp.ravel(nominees)))
-            boundaries = jnp.concatenate(
-                    (boundaries, layer.bounds.bounds.reshape(-1, 4)))
-        values, indices = jax.lax.top_k(values, candidates)
-        return values, boundaries[indices]
-
-    @jax.jit(static_argnames=['candidates'])
-    def stat(self, candidates=16):
-        values = jnp.ravel(self.stack[-1].bounds.metric)
-        stats = self.stack[-1].stat().reshape(-1, 6)
         suppressors = range(len(self.stack) - 1, 0, -1)
         for i, layer in zip(suppressors, self.stack[-2::-1]):
             nominees = jnp.where(self.nms(i), layer.bounds.metric, 0)
             values = jnp.concatenate((values, jnp.ravel(nominees)))
-            stats = jnp.concatenate((stats, layer.stat().reshape(-1, 6)))
         values, indices = jax.lax.top_k(values, candidates)
-        return values, stats[indices]
+        return values, indices
+
+    @cached_property
+    def bounds(self):
+        boundaries = self.stack[-1].bounds.bounds.reshape(-1, 4)
+        for layer in self.stack[-2::-1]:
+            boundaries = jnp.concatenate(
+                    (boundaries, layer.bounds.bounds.reshape(-1, 4)))
+        return boundaries
+
+    def bound(self, candidates):
+        values, indices = self.nominate(candidates)
+        return values, self.bounds[indices]
+
+    @cached_property
+    def stats(self):
+        stats = self.stack[-1].stat().reshape(-1, 6)
+        for layer in self.stack[-2::-1]:
+            stats = jnp.concatenate((stats, layer.stat().reshape(-1, 6)))
+        return stats
+
+    def stat(self, candidates):
+        values, indices = self.nominate(candidates)
+        return values, self.stats[indices]
 
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(
@@ -648,37 +655,8 @@ class BinSum(object):
         shifted = jax.lax.dynamic_slice(self.sum, offset, shape)
         return BinSum(jax.lax.reduce_window(shifted, 0., jax.lax.add, *bin_win))
 
-class Perspective(Raster):
-    f_35mm = None
-
-    @property
-    def f_px(self):
-        return self.f_35mm / 35 * jnp.linalg.norm(self.shape)
-
-    @property
-    def fov_sec(self):
-        f_center = (self.coord - self.shape[None] / 2) / self.f_px
-        return jnp.sqrt(1 + jnp.sum(f_center ** 2, axis=-1))
-
-    @cached_property
-    def depth(self):
-        # TODO
-        # if self.f_35mm is None:
-        if True:
-            return self.data(self.cache)
-        # trends the right direction since depths are flipped
-        return self.data(self.cache / self.fov_sec)
-
-class M2(Perspective):
+class M2(Raster):
     target = (392, 518)  # coremltools benchmark resolution
-    f_35mm = 18
-
-class Demo(Perspective):  # Logitech Webcam C925e
-    target = (1080, 1920)
-    f_35mm = 15.17  # 3.67 mm focal length / (1/3 inch sensor size) * (35mm)
-
-class Demo(Demo):  # testing
-    target = (392, 518)
 
 examples_dir = local / "assets" / "examples"
 cache_dir = local / "cache"
