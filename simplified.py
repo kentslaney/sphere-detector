@@ -318,6 +318,8 @@ class Bounds(object):
             (slice(0, -1), slice(1, None)),
             (slice(1, None), slice(1, None)))
 
+    alpha = 0.1  # density stabilization coefficient
+
     def merge(self):
         f = jax.lax.reduce_window
         inits = tuple(map(self.bounds.dtype.type, self.shape + (-1, -1)))
@@ -340,17 +342,12 @@ class Bounds(object):
 
     @cached_property
     def metric(self):
-        # TODO
-        areas, total = self.area(), self.counts.size
-        alpha, beta = 1.5, 0.1
-        return (self.counts ** beta) / (
-                areas + alpha * total * self.scale ** 2) / (
-                self.scale ** 2)
         # counts ~ area
         # counts ** 1.5 / area / sqrt(scale) ~ sqrt(area / scale)
         # which is resolution invariant
-        return (self.counts ** 1.5) / \
-                jax.lax.max(self.area(), self.scale ** 2) / self.scale
+        areas, total = self.area(), self.counts.size
+        return (self.counts ** 1.5) / (
+                areas + self.alpha * total * self.scale ** 2) / self.scale
 
     def __getitem__(self, key):
         offset = jnp.array([i.start for i in key])
