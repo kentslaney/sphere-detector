@@ -123,7 +123,7 @@ class Raster:
         if cache is not None:
             self.cache = cache
 
-    def draw_candidates(self, ax, max_outliers=3):
+    def draw_candidates(self, ax):
         import matplotlib.patches as patches
         ax.imshow(self.cropped())
         _, bboxes = Seives.create(self.depth.binned()).nominate()
