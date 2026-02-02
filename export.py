@@ -12,7 +12,7 @@ import jax.numpy as jnp
 @jax.jit
 def jax_density(x):
     x = x.reshape(target)
-    confidence, coordinates = M2(jnp.array([]), x).depth.binned().nominate()
+    confidence, coordinates = M2(jnp.array([]), x).depth.binned().bound()
     confidence = jnp.astype(confidence, jnp.float16)
     coordinates /= jnp.tile(jnp.array(target), [1, 2])
     coordinates = jnp.hstack((

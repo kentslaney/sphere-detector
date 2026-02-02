@@ -160,7 +160,7 @@ class Raster:
         ax.imshow(self.cropped())
         confidences, stats = Seives.create(self.depth.binned()).stat(candidates)
         kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
-        for y, x, r, _, _, _ in jnp.unstack(stats):
+        for y, x, r in jnp.unstack(stats[:, :3]):
             overlay = patches.Circle((x, y), r, **kw)
             ax.add_patch(overlay)
         return ax
@@ -264,7 +264,8 @@ class Depth(object):
                 0, bounds,
                 indices.stat(centers[:, 0]),
                 indices.stat(centers[:, 1]),
-                indices.stat(jnp.ravel(self.radii)))
+                indices.stat(jnp.ravel(self.radii)),
+                indices.stat(jnp.ravel(self.depth)))
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -386,7 +387,7 @@ class Bounds(object):
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["bounds", "center_0th", "center_1st", "radius"],
+        data_fields=["bounds", "center_0th", "center_1st", "radius", "depth"],
         meta_fields=["level"])
 @dataclass
 class Bins(object):
@@ -395,6 +396,7 @@ class Bins(object):
     center_0th: any
     center_1st: any
     radius: any
+    depth: any
 
     @property
     def counts(self):
@@ -410,7 +412,8 @@ class Bins(object):
                 self.level + 1, bounds,
                 self.center_0th.merge(bounds.offset),
                 self.center_1st.merge(bounds.offset),
-                self.radius.merge(bounds.offset))
+                self.radius.merge(bounds.offset),
+                self.depth.merge(bounds.offset))
 
     @cached_property
     def primaries(self):
@@ -447,10 +450,11 @@ class Bins(object):
         upscaled = jnp.repeat(jnp.repeat(inc, 2, 0), 2, 1)
         return upscaled * self.primaries
 
-    # mean(row) mean(col) mean(radius) var(row) var(col) var(radius)
+    # row, col, radius, depth
+    # means then variances
     def stat(self):
         out = []
-        for i in (self.center_0th, self.center_1st, self.radius):
+        for i in (self.center_0th, self.center_1st, self.radius, self.depth):
             out.append(i.stat(self.counts))
         return jnp.stack(sum(zip(*out), ()), axis=-1)
 
