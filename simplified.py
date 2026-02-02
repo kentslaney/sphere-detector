@@ -340,6 +340,7 @@ class Bounds(object):
 
     @cached_property
     def metric(self):
+        # TODO
         areas, total = self.area(), self.counts.size
         alpha, beta = 1.5, 0.1
         return (self.counts ** beta) / (
@@ -511,6 +512,8 @@ class Seives(object):
 
     # @jax.jit(static_argnames=["level"])
     def nms(self, level):
+        # TODO
+        return True
         assert 0 < level < len(self.stack), "layer must store primaries"
         # Only primaries can be candidates, subject to the filter:
         #     Primaries block out 1 level down surroundings
@@ -662,7 +665,9 @@ class Perspective(Raster):
 
     @cached_property
     def depth(self):
-        if self.f_35mm is None:
+        # TODO
+        # if self.f_35mm is None:
+        if True:
             return self.data(self.cache)
         # trends the right direction since depths are flipped
         return self.data(self.cache / self.fov_sec)
