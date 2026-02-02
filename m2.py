@@ -14,5 +14,5 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     for im in [im4, im5, im7, im8]:
     # for im in [im4]:
-        im.draw_candidates(plt.subplots()[1])
+        im.draw_stats(plt.subplots()[1], 32)
         plt.show()
