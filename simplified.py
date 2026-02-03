@@ -1,6 +1,7 @@
 import sys, pathlib, math
 from functools import cached_property, partial
 from dataclasses import dataclass
+from collections import namedtuple
 
 import jax
 import jax.numpy as jnp
@@ -160,7 +161,7 @@ class Raster:
         ax.imshow(self.cropped())
         confidences, stats = Seives.create(self.depth.binned()).stat(candidates)
         kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
-        for y, x, r in jnp.unstack(stats[:, :3]):
+        for y, x, r in stats.mean[:3]:
             overlay = patches.Circle((x, y), r, **kw)
             ax.add_patch(overlay)
         return ax
@@ -450,12 +451,12 @@ class Bins(object):
         upscaled = jnp.repeat(jnp.repeat(inc, 2, 0), 2, 1)
         return upscaled * self.primaries
 
-    # row, col, radius, depth
+    stats = ('center_0th', 'center_1st', 'radius', 'depth')
     # means then variances
     def stat(self):
         out = []
-        for i in (self.center_0th, self.center_1st, self.radius, self.depth):
-            out.append(i.stat(self.counts))
+        for i in self.stats:
+            out.append(getattr(self, i).stat(self.counts))
         return jnp.stack(sum(zip(*out), ()), axis=-1)
 
 def kron_bool(a, b):
@@ -617,7 +618,35 @@ class Seives(object):
 
     def stat(self, candidates):
         values, indices = self.nominate(candidates)
-        return values, self.flattened(lambda x: x.stat())[indices]
+        return values, FlatStat(self.flattened(lambda x: x.stat())[indices])
+
+@partial(
+        jax.tree_util.register_dataclass,
+        data_fields=["stats"], meta_fields=[])
+@dataclass
+class FlatStat(object):
+    stats: any
+
+    order = Bins.stats
+
+    def __post_init__(self, *a, **kw):
+        assert self.stats.shape[-1] == len(self.order) * 2
+        assert self.stats.ndim == 2
+
+    @cached_property
+    def mean(self):
+        return namedtuple('Means', self.order)(*jnp.unstack(
+            self.stats[:, :len(self.order)], axis=-1))
+
+    @cached_property
+    def var(self):
+        return namedtuple('Variances', self.order)(*jnp.unstack(
+            self.stats[:, len(self.order):], axis=-1))
+
+    @cached_property
+    def std(self):
+        return namedtuple('StandardDeviations', self.order)(*map(
+            jnp.sqrt, self.var))
 
 # TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(
@@ -656,13 +685,15 @@ class BinSum(object):
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["origin", "theta"], meta_fields=["distance"])
+        data_fields=["depth", "origin", "theta"], meta_fields=["distance"])
 @dataclass
 class AliasedRay(object):
+    depth: any
     origin: any
     theta: any
     distance: any
 
+    @cached_property
     def steps(self):
         offset = self.theta + jnp.pi / 4
         quad = jnp.astype(offset // (jnp.pi / 2), jnp.int8) % 4
@@ -670,7 +701,7 @@ class AliasedRay(object):
         slope = jnp.tan(offset % (jnp.pi / 2) - jnp.pi / 4) * flip
         sign, axis = jnp.where(quad // 2, 1, -1), quad % 2
         bias = sign * self.origin[axis] % 1
-        fp = self.origin[1 - axis] - bias * slope * sign
+        fp = self.origin[1 - axis] + bias * slope
         counting = jnp.int16(self.origin[axis] - bias * sign)
         steps = jnp.arange(self.distance, dtype=jnp.int16)
         indices = counting - sign * steps
@@ -681,10 +712,27 @@ class AliasedRay(object):
                 axis, jnp.vstack((indices, lo)), jnp.vstack((lo, indices)))
         hi = jnp.where(
                 axis, jnp.vstack((indices, hi)), jnp.vstack((hi, indices)))
-        return jnp.hstack((lo, hi))
+        return (lo, hi)
 
     def adjacent(self):
-        pass
+        lo, hi = self.steps
+        return (
+            self.depth.at[*lo].get(wrap_negative_indices=False, mode="fill"),
+            self.depth.at[*hi].get(wrap_negative_indices=False, mode="fill"))
+
+    def occludes(self, series, lo, hi):
+        valid = jnp.logical_and(series[:-1] >= lo, series[:-1] < hi)
+        lowers = series[1:] < lo
+        edge = jnp.logical_and(valid, lowers)
+        return jnp.where(edge, size=1, fill_value=-2)[0][0]
+
+    def poi(self, lo, hi):
+        x0, x1 = self.steps
+        y0, y1 = self.adjacent()
+        z0, z1 = self.occludes(y0, lo, hi), self.occludes(y1, lo, hi)
+        return jnp.where(
+                jnp.logical_or(z0 < 0, z1 < 0), jnp.array([-1, -1]),
+                jnp.sum(x0[:, z0:z0 + 2] + x1[:, z1:z1 + 2], -1) / 4)
 
 class M2(Raster):
     target = (392, 518)  # coremltools benchmark resolution
