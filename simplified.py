@@ -721,6 +721,7 @@ class AliasedRay(object):
             self.depth.at[*hi].get(wrap_negative_indices=False, mode="fill"))
 
     def occludes(self, series, lo, hi):
+        # TODO: look for most negative derivative peak
         valid = jnp.logical_and(series[:-1] >= lo, series[:-1] < hi)
         lowers = series[1:] < lo
         edge = jnp.logical_and(valid, lowers)
@@ -730,9 +731,10 @@ class AliasedRay(object):
         x0, x1 = self.steps
         y0, y1 = self.adjacent()
         z0, z1 = self.occludes(y0, lo, hi), self.occludes(y1, lo, hi)
+        w = jnp.hstack((x0[:, z0:z0 + 2], x1[:, z1:z1 + 2]))
         return jnp.where(
                 jnp.logical_or(z0 < 0, z1 < 0), jnp.array([-1, -1]),
-                jnp.sum(x0[:, z0:z0 + 2] + x1[:, z1:z1 + 2], -1) / 4)
+                jnp.sum(w, -1) / 4)
 
 class M2(Raster):
     target = (392, 518)  # coremltools benchmark resolution

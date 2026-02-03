@@ -15,27 +15,13 @@ import matplotlib.pyplot as plt
 a = jnp.array([
     stats.mean.center_0th - crop[0].start,
     stats.mean.center_1st - crop[1].start])
+mean, std = stats.mean.depth[0], stats.std.depth[0]
+lo, hi = mean - std, mean + std
+fig1 = plt.figure()
+ax1 = fig1.add_subplot(111)
+ax1.imshow(sphere)
 
-for b in range(7):
-    c = AliasedRay(sphere, a, b, 20)
-    # fig1, fig2 = plt.figure(), plt.figure()
-    # ax1, ax2 = fig1.add_subplot(111), fig2.add_subplot(111)
-    fig1 = plt.figure()
-    ax1 = fig1.add_subplot(111)
+c = jnp.array([AliasedRay(sphere, a, b, 20).poi(lo, hi) for b in range(63)]).T
+ax1.scatter(*c[::-1])
 
-    ax1.scatter(*a[::-1])
-    d = jnp.hstack(c.steps)
-    ax1.imshow(sphere)
-    ax1.scatter(*d[::-1])
-
-    # lo, hi = c.adjacent()
-    mean, std = stats.mean.depth[0], stats.std.depth[0]
-    # ax2.plot(lo)
-    # ax2.plot(hi)
-    # ax2.axhline(mean - std)
-    # ax2.axhline(mean)
-    # ax2.axhline(mean + std)
-
-    ax1.scatter(*c.poi(mean - std, mean + std)[::-1])
-
-    plt.show()
+plt.show()
