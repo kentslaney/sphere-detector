@@ -656,11 +656,12 @@ class BinSum(object):
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["origin", "theta"], meta_fields=[])
+        data_fields=["origin", "theta"], meta_fields=["distance"])
 @dataclass
 class AliasedRay(object):
     origin: any
     theta: any
+    distance: any
 
     def steps(self):
         offset = self.theta + jnp.pi / 4
@@ -671,10 +672,16 @@ class AliasedRay(object):
         bias = sign * self.origin[axis] % 1
         fp = self.origin[1 - axis] - bias * slope * sign
         counting = jnp.int16(self.origin[axis] - bias * sign)
-        return jnp.where(
-                axis, jnp.array([fp, counting]), jnp.array([counting, fp]))
-        return jnp.where(
-                axis, jnp.array([slope, -sign]), jnp.array([-sign, slope]))
+        steps = jnp.arange(self.distance, dtype=jnp.int16)
+        indices = counting - sign * steps
+        frac = fp + slope * steps
+        lo = jnp.int16(frac)
+        hi = lo + 1
+        lo = jnp.where(
+                axis, jnp.vstack((indices, lo)), jnp.vstack((lo, indices)))
+        hi = jnp.where(
+                axis, jnp.vstack((indices, hi)), jnp.vstack((hi, indices)))
+        return jnp.hstack((lo, hi))
 
     def adjacent(self):
         pass

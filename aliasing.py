@@ -9,6 +9,6 @@ a = jnp.array([1.8, 2.3])
 import matplotlib.pyplot as plt
 plt.scatter(*a)
 # print(b.origin, b.steps())
-b = [AliasedRay(a, i / 10).steps() for i in range(62)]
-plt.scatter(*zip(*b))
+b = [AliasedRay(a, i, 10).steps() for i in range(7)]
+plt.scatter(*tuple(zip(*b))[::-1])
 plt.show()
