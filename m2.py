@@ -14,6 +14,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     # for im in [im4, im5, im7, im8]:
     for im in [im4]:
-        im.draw_stats(plt.subplots()[1])
+        # im.draw_stats(plt.subplots()[1])
         # plt.imshow(jnp.log(im4.depth.norm2))
+        plt.imshow(im4.depth.depth)
         plt.show()

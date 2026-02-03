@@ -654,6 +654,31 @@ class BinSum(object):
         shifted = jax.lax.dynamic_slice(self.sum, offset, shape)
         return BinSum(jax.lax.reduce_window(shifted, 0., jax.lax.add, *bin_win))
 
+@partial(
+        jax.tree_util.register_dataclass,
+        data_fields=["origin", "theta"], meta_fields=[])
+@dataclass
+class AliasedRay(object):
+    origin: any
+    theta: any
+
+    def steps(self):
+        offset = self.theta + jnp.pi / 4
+        quad = jnp.astype(offset // (jnp.pi / 2), jnp.int8) % 4
+        flip = jnp.where(quad % 3, -1, 1)
+        slope = jnp.tan(offset % (jnp.pi / 2) - jnp.pi / 4) * flip
+        sign, axis = jnp.where(quad // 2, 1, -1), quad % 2
+        bias = sign * self.origin[axis] % 1
+        fp = self.origin[1 - axis] - bias * slope * sign
+        counting = jnp.int16(self.origin[axis] - bias * sign)
+        return jnp.where(
+                axis, jnp.array([fp, counting]), jnp.array([counting, fp]))
+        return jnp.where(
+                axis, jnp.array([slope, -sign]), jnp.array([-sign, slope]))
+
+    def adjacent(self):
+        pass
+
 class M2(Raster):
     target = (392, 518)  # coremltools benchmark resolution
 
