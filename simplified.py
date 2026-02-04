@@ -617,6 +617,7 @@ class Seives(object):
         return values, self.flattened(lambda x: x.bounds.bounds)[indices]
 
     def stat(self, candidates):
+        # TODO: avoid flattening the stats to enable dead op removal
         values, indices = self.nominate(candidates)
         return values, FlatStat(self.flattened(lambda x: x.stat())[indices])
 
