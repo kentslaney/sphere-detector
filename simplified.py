@@ -648,7 +648,6 @@ class FlatStat(object):
         return namedtuple('StandardDeviations', self.order)(*map(
             jnp.sqrt, self.var))
 
-# TODO(?): https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["sum", "sum_sq"], meta_fields=[])
@@ -695,23 +694,23 @@ class AliasedRay(object):
 
     @cached_property
     def steps(self):
+        assert self.origin.ndim == 2 and self.origin.shape[-1] == 2
         offset = self.theta + jnp.pi / 4
         quad = jnp.astype(offset // (jnp.pi / 2), jnp.int8) % 4
         flip = jnp.where(quad % 3, -1, 1)
         slope = jnp.tan(offset % (jnp.pi / 2) - jnp.pi / 4) * flip
-        sign, axis = jnp.where(quad // 2, 1, -1), quad % 2
-        bias = sign * self.origin[axis] % 1
-        fp = self.origin[1 - axis] + bias * slope
-        counting = jnp.int16(self.origin[axis] - bias * sign)
-        steps = jnp.arange(self.distance, dtype=jnp.int16)
-        indices = counting - sign * steps
-        frac = fp + slope * steps
+        sign, axis = jnp.where(quad // 2, 1, -1)[None, :], quad % 2
+        bias = sign * self.origin[:, axis] % 1
+        fp = self.origin[:, 1 - axis] + bias * slope
+        counting = jnp.int16(self.origin[:, axis] - bias * sign)
+        steps = jnp.arange(self.distance, dtype=jnp.int16)[None, None, :]
+        indices = counting[..., None] - sign[..., None] * steps
+        frac = fp[..., None] + slope[None, :, None] * steps
         lo = jnp.int16(frac)
         hi = lo + 1
-        lo = jnp.where(
-                axis, jnp.vstack((indices, lo)), jnp.vstack((lo, indices)))
-        hi = jnp.where(
-                axis, jnp.vstack((indices, hi)), jnp.vstack((hi, indices)))
+        axis = axis[None, None, :, None]
+        lo = jnp.where(axis, jnp.stack((indices, lo)), jnp.stack((lo, indices)))
+        hi = jnp.where(axis, jnp.stack((indices, hi)), jnp.stack((hi, indices)))
         return (lo, hi)
 
     def adjacent(self):
@@ -722,19 +721,28 @@ class AliasedRay(object):
 
     def occludes(self, series, lo, hi):
         # TODO: look for most negative derivative peak
-        valid = jnp.logical_and(series[:-1] >= lo, series[:-1] < hi)
-        lowers = series[1:] < lo
+        lo, hi = lo[:, None, None], hi[:, None, None]
+        valid = jnp.logical_and(series[..., :-1] >= lo, series[..., :-1] < hi)
+        lowers = series[..., 1:] < lo
         edge = jnp.logical_and(valid, lowers)
-        return jnp.where(edge, size=1, fill_value=-2)[0][0]
+        edge = jnp.concatenate(
+                (jnp.zeros(edge.shape[:2] + (1,), dtype=jnp.bool), edge), -1)
+        return jnp.argmax(edge, -1) - 1
 
     def poi(self, lo, hi):
         x0, x1 = self.steps
         y0, y1 = self.adjacent()
         z0, z1 = self.occludes(y0, lo, hi), self.occludes(y1, lo, hi)
-        w = jnp.hstack((x0[:, z0:z0 + 2], x1[:, z1:z1 + 2]))
-        return jnp.where(
-                jnp.logical_or(z0 < 0, z1 < 0), jnp.array([-1, -1]),
-                jnp.sum(w, -1) / 4)
+        dims = jax.lax.GatherDimensionNumbers((2,), (), (2,), (0, 1), (0, 1))
+        w0 = jnp.stack((
+            jax.lax.gather(x0[0], z0[..., None], dims, (1, 1, 2)),
+            jax.lax.gather(x0[1], z0[..., None], dims, (1, 1, 2))))
+        w1 = jnp.stack((
+            jax.lax.gather(x1[0], z1[..., None], dims, (1, 1, 2)),
+            jax.lax.gather(x1[1], z1[..., None], dims, (1, 1, 2))))
+        w = jnp.sum(w0 + w1, -1) / 4
+        z = jnp.logical_or(z0 < 0, z1 < 0)[None]
+        return jnp.where(z, jnp.array([-1, -1])[:, None, None], w)
 
 class M2(Raster):
     target = (392, 518)  # coremltools benchmark resolution
