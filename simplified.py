@@ -796,9 +796,11 @@ class AliasedRay(object):
 
     # (3, self.candidates)
     def loss(self, x):
-        # TODO:  High radius (potentially low confidence) dominates the loss
-        #        which hurts accuracy for smaller predictions.
-        #        They're linearly independent but the optimizer changes priority
+        # TODO: High radius (potentially low confidence) dominates the loss
+        #       which hurts accuracy for smaller predictions.
+        #       They're linearly independent but the optimizer changes priority.
+        #       As of 88f5250 m2.py drawing 1 candidate vs 16 for im4 produces
+        #       noticably different highest confidence predictions.
         # POI distance from first two components, compare to predicted radius
         x = x.reshape(3, -1)
         d = jnp.sqrt(jnp.sum((x[:2, :, None] - self.poi) ** 2, 0))
