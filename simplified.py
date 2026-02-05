@@ -6,6 +6,7 @@ from collections import namedtuple
 import jax
 import jax.numpy as jnp
 from jax.scipy.signal import correlate2d
+from jax.scipy.optimize import minimize
 from transformers import pipeline
 
 from PIL import Image
@@ -649,6 +650,9 @@ class FlatStat(object):
         return namedtuple('StandardDeviations', self.order)(*map(
             jnp.sqrt, self.var))
 
+    def offset(self, origin):
+        return __class__(self.stats.at[0, :2].subtract(origin))
+
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["sum", "sum_sq"], meta_fields=[])
@@ -685,17 +689,41 @@ class BinSum(object):
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["depth", "origin", "theta"], meta_fields=["distance"])
+        data_fields=[
+            "depth", "origin", "theta", "depth_mean", "depth_std",
+            "radius_mean", "radius_std"],
+        meta_fields=["distance"])
 @dataclass
 class AliasedRay(object):
     depth: any
     origin: any
     theta: any
     distance: any
+    depth_mean: any
+    depth_std: any
+    radius_mean: any
+    radius_std: any
+
+    eta = 1.0  # ridge regression coefficient
+
+    def __post_init__(self, *a, **kw):
+        assert self.origin.ndim == 2 and self.origin.shape[-1] == 2
+
+    @classmethod
+    def from_binstats(cls, depth, stats, rays, distance):
+        return cls(
+                depth,
+                jnp.stack((stats.mean.center_0th, stats.mean.center_1st), -1),
+                jnp.linspace(0, 2 * jnp.pi, rays, endpoint=False), distance,
+                stats.mean.depth, stats.std.depth,
+                stats.mean.radius, stats.std.radius)
+
+    @property
+    def candidates(self):
+        return self.origin.shape[0]
 
     @cached_property
     def steps(self):
-        assert self.origin.ndim == 2 and self.origin.shape[-1] == 2
         offset = self.theta + jnp.pi / 4
         quad = jnp.astype(offset // (jnp.pi / 2), jnp.int8) % 4
         flip = jnp.where(quad % 3, -1, 1)
@@ -720,8 +748,11 @@ class AliasedRay(object):
             self.depth.at[*lo].get(wrap_negative_indices=False, mode="fill"),
             self.depth.at[*hi].get(wrap_negative_indices=False, mode="fill"))
 
-    def occludes(self, series, lo, hi):
+    def occludes(self, series):
         # TODO: look for most negative derivative peak
+        lo = self.depth_mean - self.depth_std
+        hi = self.depth_mean + self.depth_std
+
         lo, hi = lo[:, None, None], hi[:, None, None]
         valid = jnp.logical_and(series[..., :-1] >= lo, series[..., :-1] < hi)
         lowers = series[..., 1:] < lo
@@ -730,10 +761,13 @@ class AliasedRay(object):
                 (jnp.zeros(edge.shape[:2] + (1,), dtype=jnp.bool), edge), -1)
         return jnp.argmax(edge, -1) - 1
 
-    def poi(self, lo, hi):
+    # (2, self.candidates, self.theta.size)
+    @cached_property
+    def poi(self):
+        # TODO: remove duplicates?
         x0, x1 = self.steps
         y0, y1 = self.adjacent()
-        z0, z1 = self.occludes(y0, lo, hi), self.occludes(y1, lo, hi)
+        z0, z1 = self.occludes(y0), self.occludes(y1)
         dims = jax.lax.GatherDimensionNumbers((2,), (), (2,), (0, 1), (0, 1))
         w0 = jnp.stack((
             jax.lax.gather(x0[0], z0[..., None], dims, (1, 1, 2)),
@@ -744,6 +778,32 @@ class AliasedRay(object):
         w = jnp.sum(w0 + w1, -1) / 4
         z = jnp.logical_or(z0 < 0, z1 < 0)[None]
         return jnp.where(z, jnp.array([-1, -1])[:, None, None], w)
+
+    @cached_property
+    def oob(self):
+        return self.poi[:1] < 0
+
+    @cached_property
+    def count(self):
+        return self.theta.size - jnp.sum(self.oob[0], -1)
+
+    # (3, self.candidates)
+    def loss(self, x):
+        # POI distance from first two components, compare to predicted radius
+        x = x.reshape(3, -1)
+        d = jnp.sqrt(jnp.sum((x[:2, :, None] - self.poi) ** 2, 0))
+        shrinkage = jnp.abs(x[2] - self.radius_mean) / self.radius_std
+        return (
+                jnp.sum(jnp.sqrt(jnp.sum(jnp.where(
+                    self.oob, 0, (x[2] - d) ** 2), -1)) / self.count) +
+                self.eta * jnp.sum(shrinkage / jnp.sqrt(self.count))) / \
+                        self.candidates
+
+    def fit(self):
+        init = jnp.concatenate((self.origin, self.radius_mean[:, None]), -1).T
+        res = minimize(self.loss, jnp.ravel(init), method="BFGS").x
+        return namedtuple("Circles", ("center_0th", "center_1st", "radius"))(
+                *jnp.unstack(res.reshape(3, -1)))
 
 class M2(Raster):
     target = (392, 518)  # coremltools benchmark resolution
