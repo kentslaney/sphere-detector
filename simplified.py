@@ -356,6 +356,7 @@ class Bounds(object):
         # counts ** 1.5 / area / sqrt(scale) ~ sqrt(area / scale)
         # which is resolution invariant
         areas, total = self.area(), self.counts.size
+        # TODO: justify the alpha term
         return (self.counts ** 1.5) / (
                 areas + self.alpha * total * self.scale ** 2) / self.scale
 
@@ -801,10 +802,12 @@ class AliasedRay(object):
         #       They're linearly independent but the optimizer changes priority.
         #       As of 88f5250 m2.py drawing 1 candidate vs 16 for im4 produces
         #       noticably different highest confidence predictions.
-        # POI distance from first two components, compare to predicted radius
+        # I'm not redoing the shapes, and I might end up splitting into
+        # Fibonacci sized groups, so just split into size 1 instances for now
         x = x.reshape(3, -1)
         d = jnp.sqrt(jnp.sum((x[:2, :, None] - self.poi) ** 2, 0))
         shrinkage = jnp.abs(x[2] - self.radius_mean) / self.radius_std
+        # sqrt(count) in the regularization term is a guess
         return (
                 jnp.sum(jnp.sqrt(jnp.sum(jnp.where(
                     self.oob, 0, (x[2, :, None] - d) ** 2), -1)) / self.count) +
