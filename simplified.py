@@ -85,12 +85,15 @@ class Da2:
         import numpy as np
         return jnp.array(self.model.infer_image(np.array(im)))
 
+# hyperparameters: Raster.rays, Bins.alpha, AliasedRay.eta
 class Raster:
     rng = [jax.random.key(0)]
     key = None
     model = Da2('vits')
     target = None
     f_35mm = None
+
+    rays = 64
 
     def data(self, *a, **kw):
         return Depth(*a, rng=self.key, **kw)
@@ -147,22 +150,25 @@ class Raster:
         if cache is not None:
             self.cache = cache
 
-    def draw_bounds(self, ax, candidates=16):
-        import matplotlib.patches as patches
-        ax.imshow(self.cropped())
-        _, bboxes = Seives.create(self.depth.binned()).bound(candidates)
-        kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
-        for i in jnp.unstack(bboxes):
-            rect = patches.Rectangle(i[1::-1], *(i[:1:-1] - i[1::-1]), **kw)
-            ax.add_patch(rect)
-        return ax
+    @property
+    def diag(self):
+        return jnp.linalg.norm(self.shape)
 
-    def draw_stats(self, ax, candidates=16):
+    def bound(self, candidates=16):
+        confidences, pred = Seives.create(self.depth.binned()).stat(candidates)
+        refit = AliasedRay.from_binstats(
+                self.depth.depth, pred, self.rays, self.diag // 3)
+        return confidences, refit.fit().bounds
+
+    def draw(self, ax, candidates=16):
         import matplotlib.patches as patches
         ax.imshow(self.cropped())
-        confidences, stats = Seives.create(self.depth.binned()).stat(candidates)
+        confidences, bounds = self.bound(candidates)
+        stats = jnp.concat((
+                jnp.mean(bounds.reshape(2, 2, -1), 0),
+                (bounds[2:3] - bounds[:1]) / 2))
         kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
-        for y, x, r in stats.mean[:3]:
+        for y, x, r in jnp.unstack(stats, axis=1):
             overlay = patches.Circle((x, y), r, **kw)
             ax.add_patch(overlay)
         return ax
@@ -343,6 +349,7 @@ class Bounds(object):
         y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
         return jnp.int32(y) * x
 
+    # TODO: float16
     @cached_property
     def metric(self):
         # counts ~ area
@@ -738,8 +745,8 @@ class AliasedRay(object):
         lo = jnp.int16(frac)
         hi = lo + 1
         axis = axis[None, None, :, None]
-        lo = jnp.where(axis, jnp.stack((indices, lo)), jnp.stack((lo, indices)))
-        hi = jnp.where(axis, jnp.stack((indices, hi)), jnp.stack((hi, indices)))
+        lo = jnp.where(axis, jnp.stack((lo, indices)), jnp.stack((indices, lo)))
+        hi = jnp.where(axis, jnp.stack((hi, indices)), jnp.stack((indices, hi)))
         return (lo, hi)
 
     def adjacent(self):
@@ -789,21 +796,31 @@ class AliasedRay(object):
 
     # (3, self.candidates)
     def loss(self, x):
+        # TODO:  High radius (potentially low confidence) dominates the loss
+        #        which hurts accuracy for smaller predictions.
+        #        They're linearly independent but the optimizer changes priority
         # POI distance from first two components, compare to predicted radius
         x = x.reshape(3, -1)
         d = jnp.sqrt(jnp.sum((x[:2, :, None] - self.poi) ** 2, 0))
         shrinkage = jnp.abs(x[2] - self.radius_mean) / self.radius_std
         return (
                 jnp.sum(jnp.sqrt(jnp.sum(jnp.where(
-                    self.oob, 0, (x[2] - d) ** 2), -1)) / self.count) +
+                    self.oob, 0, (x[2, :, None] - d) ** 2), -1)) / self.count) +
                 self.eta * jnp.sum(shrinkage / jnp.sqrt(self.count))) / \
                         self.candidates
 
+    # TODO: update detection confidences based on 2d fit
     def fit(self):
         init = jnp.concatenate((self.origin, self.radius_mean[:, None]), -1).T
         res = minimize(self.loss, jnp.ravel(init), method="BFGS").x
-        return namedtuple("Circles", ("center_0th", "center_1st", "radius"))(
-                *jnp.unstack(res.reshape(3, -1)))
+        return Circles(*jnp.unstack(res.reshape(3, -1)))
+
+class Circles(namedtuple("Circles", ("center_0th", "center_1st", "radius"))):
+    @property
+    def bounds(self):
+        return jnp.array([
+                self.center_0th - self.radius, self.center_1st - self.radius,
+                self.center_0th + self.radius, self.center_1st + self.radius])
 
 class M2(Raster):
     target = (392, 518)  # coremltools benchmark resolution
