@@ -158,7 +158,7 @@ class Raster:
         confidences, pred = Seives.create(self.depth.binned()).stat(candidates)
         refit = AliasedRay.from_binstats(
                 self.depth.depth, pred, self.rays, self.diag // 3)
-        return confidences, refit.fit().bounds
+        return confidences, refit.split().fit().bounds
 
     def draw(self, ax, candidates=16):
         import matplotlib.patches as patches
@@ -339,7 +339,7 @@ class Bounds(object):
                 f(self.bounds[..., 3], inits[3], jax.lax.max, *bin_win)), -1)
         counts = f(self.counts, 0, jax.lax.add, *bin_win)
         assert bin_win[0] == bin_win[1] == (2, 2)
-        return __class__(
+        return self.__class__(
                 self.shape, self.scale * bin_win[1][0], reduced, counts,
                 self.origin, self.offset, self.upscale)
 
@@ -363,7 +363,7 @@ class Bounds(object):
     def __getitem__(self, key):
         offset = jnp.array([i.start for i in key])
         origin = offset * self.scale + self.origin
-        return __class__(
+        return self.__class__(
                 self.shape, self.scale, self.bounds[key], self.counts[key],
                 origin, offset, self.counts.shape)
 
@@ -418,7 +418,7 @@ class Bins(object):
 
     def sifted(self):
         bounds = self.bounds.sifted()
-        return __class__(
+        return self.__class__(
                 self.level + 1, bounds,
                 self.center_0th.merge(bounds.offset),
                 self.center_1st.merge(bounds.offset),
@@ -659,7 +659,7 @@ class FlatStat(object):
             jnp.sqrt, self.var))
 
     def offset(self, origin):
-        return __class__(self.stats.at[0, :2].subtract(origin))
+        return self.__class__(self.stats.at[0, :2].subtract(origin))
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -758,6 +758,7 @@ class AliasedRay(object):
 
     def occludes(self, series):
         # TODO: look for most negative derivative peak
+        #       threshold by z-score
         lo = self.depth_mean - self.depth_std
         hi = self.depth_mean + self.depth_std
 
@@ -797,13 +798,6 @@ class AliasedRay(object):
 
     # (3, self.candidates)
     def loss(self, x):
-        # TODO: High radius (potentially low confidence) dominates the loss
-        #       which hurts accuracy for smaller predictions.
-        #       They're linearly independent but the optimizer changes priority.
-        #       As of 88f5250 m2.py drawing 1 candidate vs 16 for im4 produces
-        #       noticably different highest confidence predictions.
-        # I'm not redoing the shapes, and I might end up splitting into
-        # Fibonacci sized groups, so just split into size 1 instances for now
         x = x.reshape(3, -1)
         d = jnp.sqrt(jnp.sum((x[:2, :, None] - self.poi) ** 2, 0))
         shrinkage = jnp.abs(x[2] - self.radius_mean) / self.radius_std
@@ -819,6 +813,28 @@ class AliasedRay(object):
         init = jnp.concatenate((self.origin, self.radius_mean[:, None]), -1).T
         res = minimize(self.loss, jnp.ravel(init), method="BFGS").x
         return Circles(*jnp.unstack(res.reshape(3, -1)))
+
+    batched = ("origin", "depth_mean", "depth_std", "radius_mean", "radius_std")
+    def split(self):
+        res = [None] * self.candidates
+        for i in range(self.candidates):
+            res[i] = self.__class__(
+                    self.depth, theta=self.theta, distance=self.distance,
+                    **{k: getattr(self, k)[i:i + 1] for k in self.batched})
+        return OptBatch(res)
+
+@partial(
+        jax.tree_util.register_dataclass,
+        data_fields=["candidates"], meta_fields=[])
+@dataclass
+class OptBatch:
+    candidates: any
+
+    def fit(self):
+        res = [candidate.fit() for candidate in self.candidates]
+        return Circles(*[
+            jnp.concat([getattr(i, field) for i in res])
+            for field in Circles._fields])
 
 class Circles(namedtuple("Circles", ("center_0th", "center_1st", "radius"))):
     @property
