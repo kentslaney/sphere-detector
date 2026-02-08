@@ -1,13 +1,13 @@
-import sys, pathlib, math
-from functools import cached_property, partial
+import sys, pathlib, math, inspect
+from functools import cached_property, partial, wraps
 from dataclasses import dataclass
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 
 import jax
 import jax.numpy as jnp
 from jax.scipy.signal import correlate2d
 from jax.scipy.optimize import minimize
-from transformers import pipeline
+from jax.tree_util import register_pytree_node_class
 
 from PIL import Image
 from pillow_heif import register_heif_opener
@@ -16,27 +16,6 @@ register_heif_opener()
 local = pathlib.Path(__file__).parents[0]
 
 # TODO: switch to Depth Anything 3
-# TODO: why is this casting to u8 at the end? it's quantized to f16.
-#       is the other version the same granularity but normalized?
-class Da2:
-    size_mapping = { 'vits': 'Small', 'vitb': 'Base', 'vitl': 'Large' }
-
-    def __init__(self, encoder):
-        self.encoder = encoder
-
-    @property
-    def model_repo(self):
-        size = self.size_mapping[self.encoder]
-        return f'depth-anything/Depth-Anything-V2-{size}-hf'
-
-    @cached_property
-    def model(self):
-        pipe = pipeline(task="depth-estimation", model=self.model_repo)
-        return lambda x: pipe(x)["depth"]
-
-    def __call__(self, im):
-        return jnp.array(self.model(im))
-
 class Da2:
     model_configs = {
         'vits': {'features': 64, 'out_channels': [48, 96, 192, 384]},
@@ -85,18 +64,72 @@ class Da2:
         import numpy as np
         return jnp.array(self.model.infer_image(np.array(im)))
 
+def poplt(x, init=None):
+    import matplotlib.pyplot as plt
+    fig = plt.figure() if x is None else x
+    ax = fig.subplots()
+    if init is not None:
+        init(ax)
+    return fig, ax
+
+def jax_limit_cache(arg, excluded=0, axis=0, maxsize=None):
+    cache = OrderedDict()
+    def decorator(f):
+        sig = inspect.signature(f)
+        @wraps(f)
+        def wrapper(*a, **kw):
+            bound = sig.bind(*a, **kw)
+            bound.apply_defaults()
+            limit = bound.arguments[arg]
+            key = frozenset(
+                    (k, v) for k, v in bound.arguments.items() if k != arg)
+            res = None
+            if key in cache:
+                cache.move_to_end(key)
+                size, res = cache[key]
+                if size < limit:
+                    res = None
+                elif size == limit:
+                    return res
+            if res is None:
+                res = f(*a, **kw)
+                cache[key] = (limit, res)
+                if maxsize is not None and len(cache) > maxsize:
+                    cache.popitem(last=False)
+                return res
+            unmapped = 0
+            def mapping(x):
+                nonlocal unmapped
+                if x.shape[axis] != size:
+                    unmapped += 1
+                    return x
+                return jax.lax.slice_in_dim(x, 0, limit, axis=axis)
+            res = jax.tree.map(mapping, res)
+            assert unmapped == excluded, \
+                    f"{unmapped} PyTree leaves excluded, expected {excluded}"
+            return res
+        return wrapper
+    return decorator
+
 # hyperparameters: Raster.rays, Bins.alpha, AliasedRay.eta
+@register_pytree_node_class
 class Raster:
-    rng = [jax.random.key(0)]
-    key = None
     model = Da2('vits')
     target = None
     f_35mm = None
 
     rays = 64
 
+    def tree_flatten(self):
+        return (jnp.array(self.full), self.cache), None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        import numpy as np
+        return cls(Image.fromarray(np.array(children[0])), children[1])
+
     def data(self, *a, **kw):
-        return Depth(*a, rng=self.key, **kw)
+        return Depth(*a, **kw)
 
     @classmethod
     def file(cls, path, npy=None):
@@ -145,7 +178,6 @@ class Raster:
         return resample.crop(jnp.concat((origin, origin + self.shape[::-1])))
 
     def __init__(self, im, cache=None):
-        self.rng[0], self.key = jax.random.split(self.rng[0])
         self.full = im
         if cache is not None:
             self.cache = cache
@@ -154,32 +186,71 @@ class Raster:
     def diag(self):
         return jnp.linalg.norm(self.shape)
 
-    def bound(self, candidates=16):
-        confidences, pred = Seives.create(self.depth.binned()).stat(candidates)
-        refit = AliasedRay.from_binstats(
-                self.depth.depth, pred, self.rays, self.diag // 3)
-        return confidences, refit.split().fit().bounds
+    @cached_property
+    def seives(self):
+        return Seives.create(self.depth.binned())
 
-    def draw(self, ax, candidates=16):
+    def cropped_background(self, fig=None):
+        return poplt(fig, lambda ax: ax.imshow(self.cropped()))
+
+    def draw_sifted(self, fig=None, candidates=16, color='r'):
+        fig, ax = self.cropped_background(fig)
         import matplotlib.patches as patches
-        ax.imshow(self.cropped())
-        confidences, bounds = self.bound(candidates)
-        stats = jnp.concat((
-                jnp.mean(bounds.reshape(2, 2, -1), 0),
-                (bounds[2:3] - bounds[:1]) / 2))
+        _, bboxes = self.seives.bound(candidates)
+        kw = { 'linewidth': 1, 'edgecolor': color, 'facecolor': 'none' }
+        for i, x in enumerate(jnp.unstack(bboxes)):
+            rect = patches.Rectangle(x[1::-1], *(x[:1:-1] - x[1::-1]), **kw)
+            ax.add_patch(rect)
+            ax.annotate(
+                    str(i), x[1::-1], xytext=(1, -1), textcoords="offset points",
+                    va='top', ha='left', color=color)
+        return fig
+
+    @jax_limit_cache('candidates')
+    def stat(self, candidates=16):
+        return self.seives.stat(candidates)
+
+    def draw_centers(self, fig=None, candidates=16):
+        fig, ax = self.cropped_background(fig)
+        confidences, pred = self.stat(candidates)
+        ax.scatter(*pred.mean.centers.T[::-1], color='b')
+        for i, (y, x) in enumerate(pred.mean.centers):
+            ax.annotate(str(i), (x, y), color='b')
+        return fig
+
+    @jax_limit_cache('candidates', 2)
+    def opt(self, candidates=16):
+        _, pred = self.stat(candidates)
+        return AliasedRay.from_binstats(
+                self.depth.depth, pred, self.rays, self.diag // 3)
+
+    @jax_limit_cache('candidates')
+    def refit(self, candidates=16):
+        return self.stat(candidates)[0], self.opt(candidates).split().fit()
+
+    def draw_refit(self, fig=None, candidates=16):
+        fig, ax = self.cropped_background(fig)
+        import matplotlib.patches as patches
+        confidences, stats = self.refit(candidates)
         kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
-        for y, x, r in jnp.unstack(stats, axis=1):
+        for y, x, r in jnp.unstack(jnp.stack(stats), axis=1):
             overlay = patches.Circle((x, y), r, **kw)
             ax.add_patch(overlay)
-        return ax
+        return fig
+
+    def draw_candidate(self, index=0, fig=None):
+        fig, ax = self.cropped_background(fig)
+        opt = self.opt(index + 1).split().candidates[-1]
+        ax.scatter(*opt.origin.T[::-1], color='r')
+        ax.scatter(*opt.unsized[::-1], color='b')
+        return fig
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["depth", "rng"], meta_fields=[])
+        data_fields=["depth"], meta_fields=[])
 @dataclass
 class Depth(object):
     depth: any
-    rng: any
 
     @property
     def shape(self):
@@ -645,7 +716,7 @@ class FlatStat(object):
 
     @cached_property
     def mean(self):
-        return namedtuple('Means', self.order)(*jnp.unstack(
+        return SiftedMeans(*jnp.unstack(
             self.stats[:, :len(self.order)], axis=-1))
 
     @cached_property
@@ -660,6 +731,11 @@ class FlatStat(object):
 
     def offset(self, origin):
         return self.__class__(self.stats.at[0, :2].subtract(origin))
+
+class SiftedMeans(namedtuple('Means', FlatStat.order)):
+    @property
+    def centers(self):
+        return jnp.stack((self.center_0th, self.center_1st), -1)
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -720,8 +796,7 @@ class AliasedRay(object):
     @classmethod
     def from_binstats(cls, depth, stats, rays, distance):
         return cls(
-                depth,
-                jnp.stack((stats.mean.center_0th, stats.mean.center_1st), -1),
+                depth, stats.mean.centers,
                 jnp.linspace(0, 2 * jnp.pi, rays, endpoint=False), distance,
                 stats.mean.depth, stats.std.depth,
                 stats.mean.radius, stats.std.radius)
@@ -788,6 +863,10 @@ class AliasedRay(object):
         z = jnp.logical_or(z0 < 0, z1 < 0)[None]
         return jnp.where(z, jnp.array([-1, -1])[:, None, None], w)
 
+    @property
+    def unsized(self):
+        return self.poi[jnp.where(self.poi >= 0)].reshape(2, -1)
+
     @cached_property
     def oob(self):
         return self.poi[:1] < 0
@@ -843,6 +922,7 @@ class Circles(namedtuple("Circles", ("center_0th", "center_1st", "radius"))):
                 self.center_0th - self.radius, self.center_1st - self.radius,
                 self.center_0th + self.radius, self.center_1st + self.radius])
 
+@register_pytree_node_class
 class M2(Raster):
     target = (392, 518)  # coremltools benchmark resolution
 
