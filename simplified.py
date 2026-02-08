@@ -7,7 +7,6 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.signal import correlate2d
 from jax.scipy.optimize import minimize
-from jax.tree_util import register_pytree_node_class
 
 from PIL import Image
 from pillow_heif import register_heif_opener
@@ -72,7 +71,7 @@ def poplt(x, init=None):
         init(ax)
     return fig, ax
 
-def jax_limit_cache(arg, excluded=0, axis=0, maxsize=None):
+def jax_limit_cache(arg, *excluded, axis=0, maxsize=None):
     cache = OrderedDict()
     def decorator(f):
         sig = inspect.signature(f)
@@ -97,22 +96,17 @@ def jax_limit_cache(arg, excluded=0, axis=0, maxsize=None):
                 if maxsize is not None and len(cache) > maxsize:
                     cache.popitem(last=False)
                 return res
-            unmapped = 0
-            def mapping(x):
-                nonlocal unmapped
-                if x.shape[axis] != size:
-                    unmapped += 1
+            def mapping(path, x):
+                if jax.tree_util.keystr(path) in excluded:
                     return x
+                assert x.shape[axis] == size
                 return jax.lax.slice_in_dim(x, 0, limit, axis=axis)
-            res = jax.tree.map(mapping, res)
-            assert unmapped == excluded, \
-                    f"{unmapped} PyTree leaves excluded, expected {excluded}"
-            return res
+            return jax.tree.map_with_path(mapping, res)
         return wrapper
     return decorator
 
 # hyperparameters: Raster.rays, Bins.alpha, AliasedRay.eta
-@register_pytree_node_class
+@jax.tree_util.register_pytree_node_class
 class Raster:
     model = Da2('vits')
     target = None
@@ -218,7 +212,7 @@ class Raster:
             ax.annotate(str(i), (x, y), color='b')
         return fig
 
-    @jax_limit_cache('candidates', 2)
+    @jax_limit_cache('candidates', '.depth', '.theta')
     def opt(self, candidates=16):
         _, pred = self.stat(candidates)
         return AliasedRay.from_binstats(
@@ -922,9 +916,11 @@ class Circles(namedtuple("Circles", ("center_0th", "center_1st", "radius"))):
                 self.center_0th - self.radius, self.center_1st - self.radius,
                 self.center_0th + self.radius, self.center_1st + self.radius])
 
-@register_pytree_node_class
+@jax.tree_util.register_pytree_node_class
 class M2(Raster):
     target = (392, 518)  # coremltools benchmark resolution
 
 examples_dir = local / "assets" / "examples"
 cache_dir = local / "cache"
+
+im7 = M2.file(examples_dir / "IMG_0007.HEIC", cache_dir / "m2_out7.npy")
