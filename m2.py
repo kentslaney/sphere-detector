@@ -12,8 +12,6 @@ im8 = M2.file(examples_dir / "IMG_0008.HEIC", cache_dir / "m2_out8.npy")
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    # for im in [im4, im5, im7, im8]:
-    for im in [im7]:
-        # im.draw_centers(im.draw_sifted())
-        im.draw_candidate(7)
+    for im in [im4, im5, im7, im8]:
+        im.draw_refit()
         plt.show()

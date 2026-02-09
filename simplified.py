@@ -63,9 +63,11 @@ class Da2:
         import numpy as np
         return jnp.array(self.model.infer_image(np.array(im)))
 
-def poplt(x, init=None):
+def poplt(x=None, init=None):
     import matplotlib.pyplot as plt
-    fig = plt.figure() if x is None else x
+    if x is not None:
+        return x, x.gca()
+    fig = plt.figure()
     ax = fig.subplots()
     if init is not None:
         init(ax)
@@ -105,7 +107,10 @@ def jax_limit_cache(arg, *excluded, axis=0, maxsize=None):
         return wrapper
     return decorator
 
-# hyperparameters: Raster.rays, Bins.alpha, AliasedRay.eta
+# hyperparameters: Raster.rays, AliasedRay.alpha, AliasedRay.beta,
+#                  AliasedRay.delta, Bins.eps, AliasedRay.eta, AliasedRay.chi
+# TODO: probably keep these in a config object that gets passed down
+# TODO: candidates should maybe in the config too, but it affects output shape
 @jax.tree_util.register_pytree_node_class
 class Raster:
     model = Da2('vits')
@@ -178,7 +183,7 @@ class Raster:
 
     @property
     def diag(self):
-        return jnp.linalg.norm(self.shape)
+        return int(sum(i ** 2 for i in self.spec) ** 0.5)
 
     @cached_property
     def seives(self):
@@ -206,7 +211,7 @@ class Raster:
 
     def draw_centers(self, fig=None, candidates=16):
         fig, ax = self.cropped_background(fig)
-        confidences, pred = self.stat(candidates)
+        pred = self.stat(candidates)
         ax.scatter(*pred.mean.centers.T[::-1], color='b')
         for i, (y, x) in enumerate(pred.mean.centers):
             ax.annotate(str(i), (x, y), color='b')
@@ -214,18 +219,21 @@ class Raster:
 
     @jax_limit_cache('candidates', '.depth', '.theta')
     def opt(self, candidates=16):
-        _, pred = self.stat(candidates)
+        pred = self.stat(candidates)
         return AliasedRay.from_binstats(
-                self.depth.depth, pred, self.rays, self.diag // 3)
+                self.depth.depth, pred, self.rays, self.diag // 4)
 
     @jax_limit_cache('candidates')
     def refit(self, candidates=16):
-        return self.stat(candidates)[0], self.opt(candidates).split().fit()
+        return self.opt(candidates).split().fit()
 
-    def draw_refit(self, fig=None, candidates=16):
+    def draw_refit(self, fig=None, candidates=16, index=None):
         fig, ax = self.cropped_background(fig)
         import matplotlib.patches as patches
-        confidences, stats = self.refit(candidates)
+        if index is None:
+            stats = self.refit(candidates)
+        else:
+            stats = self.opt(index + 1).split().candidates[-1].fit()
         kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
         for y, x, r in jnp.unstack(jnp.stack(stats), axis=1):
             overlay = patches.Circle((x, y), r, **kw)
@@ -237,6 +245,27 @@ class Raster:
         opt = self.opt(index + 1).split().candidates[-1]
         ax.scatter(*opt.origin.T[::-1], color='r')
         ax.scatter(*opt.unsized[::-1], color='b')
+        return fig
+
+    def plot_rays(self, index=0):
+        import matplotlib.pyplot as plt
+        fig = plt.figure()
+        ax0, ax1 = fig.subplots(2, 1)
+
+        opt = self.opt(index + 1).split().candidates[-1]
+        for side in opt.adjacent():
+            for cast in side[0]:
+                ax0.plot(cast)
+        ax0.axhline(opt.depth_mean[0])
+        ax0.axhline(opt.depth_mean[0] + opt.alpha * opt.depth_std[0])
+        ax0.axhline(opt.depth_mean[0] - opt.beta * opt.depth_std[0])
+        ax0.axvline(opt.radius_mean[0] + opt.chi * opt.radius_std[0])
+
+        for side in opt.adjacent():
+            for cast in side[0]:
+                ax1.plot(cast[1:] - cast[:-1])
+        ax1.axhline(-opt.delta * opt.depth_std[0])
+        ax1.axvline(opt.radius_mean[0] + opt.chi * opt.radius_std[0])
         return fig
 
 @partial(
@@ -392,7 +421,7 @@ class Bounds(object):
             (slice(0, -1), slice(1, None)),
             (slice(1, None), slice(1, None)))
 
-    alpha = 0.1  # density stabilization coefficient
+    eps = 0.1  # density stabilization coefficient
 
     def merge(self):
         f = jax.lax.reduce_window
@@ -421,9 +450,9 @@ class Bounds(object):
         # counts ** 1.5 / area / sqrt(scale) ~ sqrt(area / scale)
         # which is resolution invariant
         areas, total = self.area(), self.counts.size
-        # TODO: justify the alpha term
+        # TODO: justify the epsilon term
         return (self.counts ** 1.5) / (
-                areas + self.alpha * total * self.scale ** 2) / self.scale
+                areas + self.eps * total * self.scale ** 2) / self.scale
 
     def __getitem__(self, key):
         offset = jnp.array([i.start for i in key])
@@ -693,13 +722,14 @@ class Seives(object):
     def stat(self, candidates):
         # TODO: avoid flattening the stats to enable dead op removal
         values, indices = self.nominate(candidates)
-        return values, FlatStat(self.flattened(lambda x: x.stat())[indices])
+        return FlatStat(values, self.flattened(lambda x: x.stat())[indices])
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["stats"], meta_fields=[])
+        data_fields=["confidences", "stats"], meta_fields=[])
 @dataclass
 class FlatStat(object):
+    confidences: any
     stats: any
 
     order = Bins.stats
@@ -782,13 +812,18 @@ class AliasedRay(object):
     radius_mean: any
     radius_std: any
 
+    alpha = 0.0  # standard deviations above mean for depth starting threshold
+    beta = 2.0  # standard deviations below mean for depth starting threshold
+    delta = 0.5  # threshold in standard deviations for the edges' jump in depth
     eta = 1.0  # ridge regression coefficient
+    chi = 0.5  # standard deviations above initial mean radius to look for edges
 
     def __post_init__(self, *a, **kw):
         assert self.origin.ndim == 2 and self.origin.shape[-1] == 2
 
     @classmethod
     def from_binstats(cls, depth, stats, rays, distance):
+        # TODO: keep initial confidences and adjust accordingly
         return cls(
                 depth, stats.mean.centers,
                 jnp.linspace(0, 2 * jnp.pi, rays, endpoint=False), distance,
@@ -826,15 +861,16 @@ class AliasedRay(object):
             self.depth.at[*hi].get(wrap_negative_indices=False, mode="fill"))
 
     def occludes(self, series):
-        # TODO: look for most negative derivative peak
-        #       threshold by z-score
-        lo = self.depth_mean - self.depth_std
-        hi = self.depth_mean + self.depth_std
+        hi = self.depth_mean + self.alpha * self.depth_std
+        lo = self.depth_mean - self.beta * self.depth_std
+        lim = self.radius_mean + self.chi * self.radius_std
 
-        lo, hi = lo[:, None, None], hi[:, None, None]
-        valid = jnp.logical_and(series[..., :-1] >= lo, series[..., :-1] < hi)
-        lowers = series[..., 1:] < lo
-        edge = jnp.logical_and(valid, lowers)
+        lo, hi, lim = lo[:, None, None], hi[:, None, None], lim[:, None, None]
+        near, far = series[..., :-1], series[..., 1:]
+        valid = jnp.logical_and(near >= lo, near < hi)
+        lowers = far - near < -self.delta * self.depth_std
+        expected = jnp.arange(self.distance - 1)[None, None] < lim
+        edge = jnp.logical_and(expected, jnp.logical_and(valid, lowers))
         edge = jnp.concatenate(
                 (jnp.zeros(edge.shape[:2] + (1,), dtype=jnp.bool), edge), -1)
         return jnp.argmax(edge, -1) - 1
@@ -882,10 +918,11 @@ class AliasedRay(object):
                         self.candidates
 
     # TODO: update detection confidences based on 2d fit
+    @jax.jit
     def fit(self):
         init = jnp.concatenate((self.origin, self.radius_mean[:, None]), -1).T
-        res = minimize(self.loss, jnp.ravel(init), method="BFGS").x
-        return Circles(*jnp.unstack(res.reshape(3, -1)))
+        res = minimize(self.loss, jnp.ravel(init), method="BFGS")
+        return Circles(*jnp.unstack(res.x.reshape(3, -1)))
 
     batched = ("origin", "depth_mean", "depth_std", "radius_mean", "radius_std")
     def split(self):
@@ -922,5 +959,3 @@ class M2(Raster):
 
 examples_dir = local / "assets" / "examples"
 cache_dir = local / "cache"
-
-im7 = M2.file(examples_dir / "IMG_0007.HEIC", cache_dir / "m2_out7.npy")
