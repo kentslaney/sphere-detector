@@ -227,17 +227,29 @@ class Raster:
     def refit(self, candidates=16):
         return self.opt(candidates).split().fit()
 
-    def draw_refit(self, fig=None, candidates=16, index=None):
+    def draw_refit(self, fig=None, candidates=16, index=None, label=True):
         fig, ax = self.cropped_background(fig)
         import matplotlib.patches as patches
         if index is None:
             stats = self.refit(candidates)
         else:
             stats = self.opt(index + 1).split().candidates[-1].fit()
-        kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
-        for y, x, r in jnp.unstack(jnp.stack(stats), axis=1):
+        color = 'r'
+        kw = { 'linewidth': 1, 'edgecolor': color, 'facecolor': 'none' }
+        if label is not None:
+            rng = jax.random.key(label)
+            thetas = jax.random.uniform(rng, stats[0].shape, maxval=2 * jnp.pi)
+        it = jnp.unstack(jnp.stack(stats), axis=1)
+        for y, x, r in it:
             overlay = patches.Circle((x, y), r, **kw)
             ax.add_patch(overlay)
+        if label is not None and index is None:
+            ax.autoscale(False)
+            for i, (y, x, r) in enumerate(it):
+                ax.plot(
+                        [x, x + jnp.cos(thetas[i]) * r],
+                        [y, y + jnp.sin(thetas[i]) * r], color=color)
+                ax.annotate(str(i), (x, y), color=color)
         return fig
 
     def draw_candidate(self, index=0, fig=None):
@@ -917,7 +929,7 @@ class AliasedRay(object):
                 self.eta * jnp.sum(shrinkage / jnp.sqrt(self.count))) / \
                         self.candidates
 
-    # TODO: update detection confidences based on 2d fit
+    # TODO: update detection confidences with res.fun and filter by res.success
     @jax.jit
     def fit(self):
         init = jnp.concatenate((self.origin, self.radius_mean[:, None]), -1).T
