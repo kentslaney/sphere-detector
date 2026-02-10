@@ -14,7 +14,7 @@ register_heif_opener()
 
 local = pathlib.Path(__file__).parents[0]
 
-# TODO: switch to Depth Anything 3
+# TODO: switch to Depth Anything 3 (after RealityKit and before Godot)
 class Da2:
     model_configs = {
         'vits': {'features': 64, 'out_channels': [48, 96, 192, 384]},
@@ -107,40 +107,61 @@ def jax_limit_cache(arg, *excluded, axis=0, maxsize=None):
         return wrapper
     return decorator
 
+@partial(
+        jax.tree_util.register_dataclass,
+        data_fields=["alpha", "beta", "delta", "eps", "eta", "chi"],
+        meta_fields=["resolution", "candidates", "rays"])
+@dataclass(kw_only=True)
+class Config:
+    # Raster
+    resolution: any = (392, 518)
+    candidates: any = 16
+    rays: any = 64
+
+    # Bounds
+    eps: any = 0.1  # density stabilization coefficient
+
+    # AliasedRay
+    alpha: any = 0.0  # standard deviations above mean for ray start depth
+    beta: any = 2.0  # standard deviations below mean for ray start depth
+    delta: any = 0.5  # threshold in standard deviations for ray depth jump
+    eta: any = 1.0  # ridge regression coefficient
+    chi: any = 0.5  # standard deviations above initial mean radius to look
+
 # hyperparameters: Raster.rays, AliasedRay.alpha, AliasedRay.beta,
 #                  AliasedRay.delta, Bins.eps, AliasedRay.eta, AliasedRay.chi
 # TODO: probably keep these in a config object that gets passed down
 # TODO: candidates should maybe in the config too, but it affects output shape
 @jax.tree_util.register_pytree_node_class
 class Raster:
+    config: any
     model = Da2('vits')
-    target = None
     f_35mm = None
 
-    rays = 64
-
     def tree_flatten(self):
-        return (jnp.array(self.full), self.cache), None
+        return (jnp.array(self.full), self.cache, self.config), None
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         import numpy as np
-        return cls(Image.fromarray(np.array(children[0])), children[1])
+        im, depths, config = children
+        return cls(Image.fromarray(np.array(im)), depths, **config)
 
     def data(self, *a, **kw):
-        return Depth(*a, **kw)
+        return Depth(self.config, *a, **kw)
 
     @classmethod
-    def file(cls, path, npy=None):
+    def file(cls, path, npy=None, **kw):
         im, cache = Image.open(path), None
         if npy is not None:
             npy = pathlib.Path(npy)
             if npy.exists():
                 cache = jnp.load(npy)
-                if jnp.any(cache.shape != im.size[::-1]) if cls.target is None \
-                        else jnp.any(cache.shape != cls.target):
+                target = kw.get("resolution", None)
+                if jnp.any(cache.shape != im.size[::-1]) if target is None \
+                        else jnp.any(cache.shape != target):
                     cache = None
-        obj = cls(im, cache)
+        obj = cls(im, cache, **kw)
         if npy is not None:
             npy.parents[0].mkdir(parents=True, exist_ok=True)
             jnp.save(npy, obj.cache)
@@ -156,7 +177,8 @@ class Raster:
 
     @property
     def spec(self):
-        return self.full.size if self.target is None else self.target
+        return self.full.size if self.config.resolution is None else \
+                self.config.resolution
 
     @property
     def shape(self):
@@ -168,7 +190,7 @@ class Raster:
         return jnp.stack((y, x), -1)
 
     def cropped(self):
-        if self.target is None:
+        if self.config.resolution is None:
             return self.full
         size = jnp.array(self.full.size)
         scaled = jnp.int32(jnp.max(self.shape[::-1] / size) * size)
@@ -176,8 +198,9 @@ class Raster:
         origin = (scaled - self.shape[::-1]) // 2
         return resample.crop(jnp.concat((origin, origin + self.shape[::-1])))
 
-    def __init__(self, im, cache=None):
+    def __init__(self, im, cache=None, **kw):
         self.full = im
+        self.config = Config(**kw)
         if cache is not None:
             self.cache = cache
 
@@ -221,7 +244,7 @@ class Raster:
     def opt(self, candidates=16):
         pred = self.stat(candidates)
         return AliasedRay.from_binstats(
-                self.depth.depth, pred, self.rays, self.diag // 4)
+                self.depth, pred, self.config.rays, self.diag // 4)
 
     @jax_limit_cache('candidates')
     def refit(self, candidates=16):
@@ -239,7 +262,9 @@ class Raster:
         if label is not None:
             rng = jax.random.key(label)
             thetas = jax.random.uniform(rng, stats[0].shape, maxval=2 * jnp.pi)
-        it = jnp.unstack(jnp.stack(stats), axis=1)
+        it = jnp.unstack(
+                jnp.stack((stats.center_0th, stats.center_1st, stats.radius)),
+                axis=1)
         for y, x, r in it:
             overlay = patches.Circle((x, y), r, **kw)
             ax.add_patch(overlay)
@@ -269,22 +294,23 @@ class Raster:
             for cast in side[0]:
                 ax0.plot(cast)
         ax0.axhline(opt.depth_mean[0])
-        ax0.axhline(opt.depth_mean[0] + opt.alpha * opt.depth_std[0])
-        ax0.axhline(opt.depth_mean[0] - opt.beta * opt.depth_std[0])
-        ax0.axvline(opt.radius_mean[0] + opt.chi * opt.radius_std[0])
+        ax0.axhline(opt.depth_mean[0] + self.config.alpha * opt.depth_std[0])
+        ax0.axhline(opt.depth_mean[0] - self.config.beta * opt.depth_std[0])
+        ax0.axvline(opt.radius_mean[0] + self.config.chi * opt.radius_std[0])
 
         for side in opt.adjacent():
             for cast in side[0]:
                 ax1.plot(cast[1:] - cast[:-1])
-        ax1.axhline(-opt.delta * opt.depth_std[0])
-        ax1.axvline(opt.radius_mean[0] + opt.chi * opt.radius_std[0])
+        ax1.axhline(-self.config.delta * opt.depth_std[0])
+        ax1.axvline(opt.radius_mean[0] + self.config.chi * opt.radius_std[0])
         return fig
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["depth"], meta_fields=[])
+        data_fields=["config", "depth"], meta_fields=[])
 @dataclass
-class Depth(object):
+class Depth:
+    config: any
     depth: any
 
     @property
@@ -372,7 +398,7 @@ class Depth(object):
             indices.scatter('max', flat_0th, -1),
             indices.scatter('max', flat_1st, -1)), -1)
         bounds = Bounds(
-                self.depth.shape, 1, bounds, counts,
+                self.config, self.depth.shape, 1, bounds, counts,
                 jnp.array([0, 0]), jnp.array([0, 0]), None)
         return Bins(
                 0, bounds,
@@ -385,7 +411,7 @@ class Depth(object):
         jax.tree_util.register_dataclass,
         data_fields=["indices"], meta_fields=["shape"])
 @dataclass
-class Casts2d(object):
+class Casts2d:
     shape: any
     indices: any
 
@@ -415,10 +441,11 @@ bin_win = ((2, 2), (2, 2))  # dimensions, strides
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["bounds", "counts", "origin", "offset"],
+        data_fields=["config", "bounds", "counts", "origin", "offset"],
         meta_fields=["shape", "scale", "upscale"])
 @dataclass
-class Bounds(object):
+class Bounds:
+    config: any
     shape: any
     scale: any
     bounds: any
@@ -433,8 +460,6 @@ class Bounds(object):
             (slice(0, -1), slice(1, None)),
             (slice(1, None), slice(1, None)))
 
-    eps = 0.1  # density stabilization coefficient
-
     def merge(self):
         f = jax.lax.reduce_window
         inits = tuple(map(self.bounds.dtype.type, self.shape + (-1, -1)))
@@ -446,8 +471,8 @@ class Bounds(object):
         counts = f(self.counts, 0, jax.lax.add, *bin_win)
         assert bin_win[0] == bin_win[1] == (2, 2)
         return self.__class__(
-                self.shape, self.scale * bin_win[1][0], reduced, counts,
-                self.origin, self.offset, self.upscale)
+                self.config, self.shape, self.scale * bin_win[1][0], reduced,
+                counts, self.origin, self.offset, self.upscale)
 
     def area(self):
         hi = jax.lax.max(self.bounds[..., :2], self.bounds[..., 2:]) + (
@@ -464,14 +489,14 @@ class Bounds(object):
         areas, total = self.area(), self.counts.size
         # TODO: justify the epsilon term
         return (self.counts ** 1.5) / (
-                areas + self.eps * total * self.scale ** 2) / self.scale
+                areas + self.config.eps * total * self.scale ** 2) / self.scale
 
     def __getitem__(self, key):
         offset = jnp.array([i.start for i in key])
         origin = offset * self.scale + self.origin
         return self.__class__(
-                self.shape, self.scale, self.bounds[key], self.counts[key],
-                origin, offset, self.counts.shape)
+                self.config, self.shape, self.scale, self.bounds[key],
+                self.counts[key], origin, offset, self.counts.shape)
 
     def sifted(self):
         hi, val = None, None
@@ -506,7 +531,7 @@ class Bounds(object):
         data_fields=["bounds", "center_0th", "center_1st", "radius", "depth"],
         meta_fields=["level"])
 @dataclass
-class Bins(object):
+class Bins:
     level: any
     bounds: any
     center_0th: any
@@ -583,7 +608,7 @@ def kron_bool(a, b):
         jax.tree_util.register_dataclass,
         data_fields=["stack"], meta_fields=[])
 @dataclass
-class Seives(object):
+class Seives:
     stack: any
 
     @classmethod
@@ -740,7 +765,7 @@ class Seives(object):
         jax.tree_util.register_dataclass,
         data_fields=["confidences", "stats"], meta_fields=[])
 @dataclass
-class FlatStat(object):
+class FlatStat:
     confidences: any
     stats: any
 
@@ -777,7 +802,7 @@ class SiftedMeans(namedtuple('Means', FlatStat.order)):
         jax.tree_util.register_dataclass,
         data_fields=["sum", "sum_sq"], meta_fields=[])
 @dataclass
-class BinStat(object):
+class BinStat:
     sum: any
     sum_sq: any
 
@@ -798,7 +823,7 @@ class BinStat(object):
         jax.tree_util.register_dataclass,
         data_fields=["sum"], meta_fields=[])
 @dataclass
-class BinSum(object):
+class BinSum:
     sum: any
 
     def merge(self, offset):
@@ -807,14 +832,16 @@ class BinSum(object):
         shifted = jax.lax.dynamic_slice(self.sum, offset, shape)
         return BinSum(jax.lax.reduce_window(shifted, 0., jax.lax.add, *bin_win))
 
+# TODO: adjust according to confidences?
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=[
-            "depth", "origin", "theta", "depth_mean", "depth_std",
-            "radius_mean", "radius_std"],
+            "config", "depth", "origin", "theta", "depth_mean", "depth_std",
+            "radius_mean", "radius_std", "confidences"],
         meta_fields=["distance"])
 @dataclass
-class AliasedRay(object):
+class AliasedRay:
+    config: any
     depth: any
     origin: any
     theta: any
@@ -823,24 +850,18 @@ class AliasedRay(object):
     depth_std: any
     radius_mean: any
     radius_std: any
-
-    alpha = 0.0  # standard deviations above mean for depth starting threshold
-    beta = 2.0  # standard deviations below mean for depth starting threshold
-    delta = 0.5  # threshold in standard deviations for the edges' jump in depth
-    eta = 1.0  # ridge regression coefficient
-    chi = 0.5  # standard deviations above initial mean radius to look for edges
+    confidences: any
 
     def __post_init__(self, *a, **kw):
         assert self.origin.ndim == 2 and self.origin.shape[-1] == 2
 
     @classmethod
     def from_binstats(cls, depth, stats, rays, distance):
-        # TODO: keep initial confidences and adjust accordingly
         return cls(
-                depth, stats.mean.centers,
+                depth.config, depth.depth, stats.mean.centers,
                 jnp.linspace(0, 2 * jnp.pi, rays, endpoint=False), distance,
                 stats.mean.depth, stats.std.depth,
-                stats.mean.radius, stats.std.radius)
+                stats.mean.radius, stats.std.radius, stats.confidences)
 
     @property
     def candidates(self):
@@ -873,14 +894,14 @@ class AliasedRay(object):
             self.depth.at[*hi].get(wrap_negative_indices=False, mode="fill"))
 
     def occludes(self, series):
-        hi = self.depth_mean + self.alpha * self.depth_std
-        lo = self.depth_mean - self.beta * self.depth_std
-        lim = self.radius_mean + self.chi * self.radius_std
+        hi = self.depth_mean + self.config.alpha * self.depth_std
+        lo = self.depth_mean - self.config.beta * self.depth_std
+        lim = self.radius_mean + self.config.chi * self.radius_std
 
         lo, hi, lim = lo[:, None, None], hi[:, None, None], lim[:, None, None]
         near, far = series[..., :-1], series[..., 1:]
         valid = jnp.logical_and(near >= lo, near < hi)
-        lowers = far - near < -self.delta * self.depth_std
+        lowers = far - near < -self.config.delta * self.depth_std
         expected = jnp.arange(self.distance - 1)[None, None] < lim
         edge = jnp.logical_and(expected, jnp.logical_and(valid, lowers))
         edge = jnp.concatenate(
@@ -926,7 +947,7 @@ class AliasedRay(object):
         return (
                 jnp.sum(jnp.sqrt(jnp.sum(jnp.where(
                     self.oob, 0, (x[2, :, None] - d) ** 2), -1)) / self.count) +
-                self.eta * jnp.sum(shrinkage / jnp.sqrt(self.count))) / \
+                self.config.eta * jnp.sum(shrinkage / jnp.sqrt(self.count))) / \
                         self.candidates
 
     # TODO: update detection confidences with res.fun and filter by res.success
@@ -934,40 +955,52 @@ class AliasedRay(object):
     def fit(self):
         init = jnp.concatenate((self.origin, self.radius_mean[:, None]), -1).T
         res = minimize(self.loss, jnp.ravel(init), method="BFGS")
-        return Circles(*jnp.unstack(res.x.reshape(3, -1)))
+        return Circles(
+                self.config, *jnp.unstack(res.x.reshape(3, -1)),
+                jnp.where(res.success, res.fun, jnp.nan)[None],
+                self.count, self.confidences)
 
-    batched = ("origin", "depth_mean", "depth_std", "radius_mean", "radius_std")
+    batched = (
+            "origin", "depth_mean", "depth_std", "radius_mean", "radius_std",
+            "confidences")
     def split(self):
         res = [None] * self.candidates
         for i in range(self.candidates):
             res[i] = self.__class__(
-                    self.depth, theta=self.theta, distance=self.distance,
+                    self.config, self.depth,
+                    theta=self.theta, distance=self.distance,
                     **{k: getattr(self, k)[i:i + 1] for k in self.batched})
-        return OptBatch(res)
+        return OptBatch(self.config, res)
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["candidates"], meta_fields=[])
+        data_fields=["config", "candidates"], meta_fields=[])
 @dataclass
 class OptBatch:
+    config: any
     candidates: any
 
     def fit(self):
         res = [candidate.fit() for candidate in self.candidates]
-        return Circles(*[
+        return Circles(self.config, *[
             jnp.concat([getattr(i, field) for i in res])
-            for field in Circles._fields])
+            for field in Circles._fields[1:]])
 
-class Circles(namedtuple("Circles", ("center_0th", "center_1st", "radius"))):
+class Circles(namedtuple("Circles", (
+        "config", "center_0th", "center_1st", "radius",
+        "loss", "samples", "granularity"))):
     @property
     def bounds(self):
         return jnp.array([
                 self.center_0th - self.radius, self.center_1st - self.radius,
                 self.center_0th + self.radius, self.center_1st + self.radius])
 
-@jax.tree_util.register_pytree_node_class
-class M2(Raster):
-    target = (392, 518)  # coremltools benchmark resolution
+    def readable(self):
+        pass
 
 examples_dir = local / "assets" / "examples"
 cache_dir = local / "cache"
+
+im4 = Raster.file(examples_dir / "IMG_0004.HEIC", cache_dir / "m2_out4.npy")
+
+res = im4.refit()
