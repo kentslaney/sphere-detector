@@ -128,10 +128,6 @@ class Config:
     eta: any = 1.0  # ridge regression coefficient
     chi: any = 0.5  # standard deviations above initial mean radius to look
 
-# hyperparameters: Raster.rays, AliasedRay.alpha, AliasedRay.beta,
-#                  AliasedRay.delta, Bins.eps, AliasedRay.eta, AliasedRay.chi
-# TODO: probably keep these in a config object that gets passed down
-# TODO: candidates should maybe in the config too, but it affects output shape
 @jax.tree_util.register_pytree_node_class
 class Raster:
     config: any
@@ -260,8 +256,9 @@ class Raster:
         color = 'r'
         kw = { 'linewidth': 1, 'edgecolor': color, 'facecolor': 'none' }
         if label is not None:
-            rng = jax.random.key(label)
-            thetas = jax.random.uniform(rng, stats[0].shape, maxval=2 * jnp.pi)
+            thetas = jax.random.uniform(
+                    jax.random.key(label),
+                    stats.radius.shape, maxval=2 * jnp.pi)
         it = jnp.unstack(
                 jnp.stack((stats.center_0th, stats.center_1st, stats.radius)),
                 axis=1)
@@ -652,7 +649,7 @@ class Seives:
             fn = layer.unshift
         return tuple(out[::-1])
 
-    # @jax.jit(static_argnames=["level"])
+    @jax.jit(static_argnames=["level"])
     def nms(self, level):
         assert 0 < level < len(self.stack), "layer must store primaries"
         # Only primaries can be candidates, subject to the filter:
@@ -950,15 +947,14 @@ class AliasedRay:
                 self.config.eta * jnp.sum(shrinkage / jnp.sqrt(self.count))) / \
                         self.candidates
 
-    # TODO: update detection confidences with res.fun and filter by res.success
+    # TODO: apparently refit for im8 doesn't converge
     @jax.jit
     def fit(self):
         init = jnp.concatenate((self.origin, self.radius_mean[:, None]), -1).T
         res = minimize(self.loss, jnp.ravel(init), method="BFGS")
         return Circles(
                 self.config, *jnp.unstack(res.x.reshape(3, -1)),
-                jnp.where(res.success, res.fun, jnp.nan)[None],
-                self.count, self.confidences)
+                self.confidences, self.count, res.fun[None], res.success[None])
 
     batched = (
             "origin", "depth_mean", "depth_std", "radius_mean", "radius_std",
@@ -988,7 +984,7 @@ class OptBatch:
 
 class Circles(namedtuple("Circles", (
         "config", "center_0th", "center_1st", "radius",
-        "loss", "samples", "granularity"))):
+        "granularity", "samples", "loss", "converged"))):
     @property
     def bounds(self):
         return jnp.array([
@@ -996,11 +992,34 @@ class Circles(namedtuple("Circles", (
                 self.center_0th + self.radius, self.center_1st + self.radius])
 
     def readable(self):
-        pass
+        success = jnp.any(self.converged).item()
+        it = jnp.nonzero(self.converged)[0] if success else \
+                jnp.nonzero(~jnp.isnan(self.loss))[0]
+        for i in it:
+            y, x = self.center_0th[i].item(), self.center_1st[i].item()
+            r, granularity = self.radius[i].item(), self.granularity[i].item()
+            loss, samples = self.loss[i].item(), self.samples[i].item()
+            print(
+                    f"[{i:2d}] ({x:6.1f}, {y:6.1f}) radius: {r:6.2f} "
+                    f"score: {granularity:.3e} "
+                    f"-{{n: {samples:2d}}}-> loss: {loss:.3e}")
+        print("---- converged" if success else "^^^^ failed")
+
+    @cached_property
+    def confidences(self):
+        # TODO: adjust with loss & samples
+        return self.granularity
 
 examples_dir = local / "assets" / "examples"
 cache_dir = local / "cache"
 
-im4 = Raster.file(examples_dir / "IMG_0004.HEIC", cache_dir / "m2_out4.npy")
+im4 = Raster.file(examples_dir / "IMG_0004.HEIC", cache_dir / "out4.npy")
+im5 = Raster.file(examples_dir / "IMG_0005.HEIC", cache_dir / "out5.npy")
+im7 = Raster.file(examples_dir / "IMG_0007.HEIC", cache_dir / "out7.npy")
+im8 = Raster.file(examples_dir / "IMG_0008.HEIC", cache_dir / "out8.npy")
 
-res = im4.refit()
+# import matplotlib.pyplot as plt
+for im in [im4, im5, im7, im8]:
+    im.refit().readable()
+    # im.draw_refit()
+    # plt.show()
