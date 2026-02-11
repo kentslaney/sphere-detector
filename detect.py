@@ -668,14 +668,12 @@ class Seives:
                 for n in range(3, -1, -1)] for m in range(3, -1, -1)])
             for j in i] for i in kernel_masks]
         strides = [
-                (slice(0, None, 2), slice(0, None, 2)),
-                (slice(0, None, 2), slice(1, None, 2)),
-                (slice(1, None, 2), slice(0, None, 2)),
-                (slice(1, None, 2), slice(1, None, 2))]
+                (lambda *a: (lambda x: jax.lax.slice(x, a, x.shape, (2, 2))))(
+                    i, j) for i in range(2) for j in range(2)]
         masks = [None] * 3
         out = ([], [], [], [])
         for a, b in zip(strides, kernels[3]):
-            out[3].append(kron_bool(self.stack[level + 1].primaries[a], b))
+            out[3].append(kron_bool(a(self.stack[level + 1].primaries), b))
         mask1lo   = self.ruler_0th[0][level][:, None]
         mask1hi   = self.ruler_0th[1][level][:, None]
         masks[1] = [mask1lo, mask1lo, mask1hi, mask1hi]
@@ -690,8 +688,8 @@ class Seives:
         masks[0] = [jax.lax.max(*jnp.meshgrid(x, y)) for y, x in mask0prod]
         for i, (mask, kernel) in enumerate(zip(masks, kernels[:3])):
             for bound, a, b in zip(mask, strides, kernel):
-                mask = self.pyramids[level][a] >= bound
-                mask = jnp.logical_and(mask, self.stack[level + 1].primaries[a])
+                mask = a(self.pyramids[level]) >= bound
+                mask = jnp.logical_and(mask, a(self.stack[level + 1].primaries))
                 out[i].append(kron_bool(mask, b))
         reduced_1st = []
         for ll, lh, hl, hh in out:
