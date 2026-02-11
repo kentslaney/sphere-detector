@@ -130,7 +130,7 @@ class Config:
 
 @jax.tree_util.register_pytree_node_class
 class Raster:
-    config: any
+    config = Config()
     model = Da2('vits')
     f_35mm = None
 
@@ -153,7 +153,8 @@ class Raster:
             npy = pathlib.Path(npy)
             if npy.exists():
                 cache = jnp.load(npy)
-                target = kw.get("resolution", None)
+                target = kw.get(
+                        "resolution", getattr(cls.config, "resolution", None))
                 if jnp.any(cache.shape != im.size[::-1]) if target is None \
                         else jnp.any(cache.shape != target):
                     cache = None
@@ -196,7 +197,7 @@ class Raster:
 
     def __init__(self, im, cache=None, **kw):
         self.full = im
-        self.config = Config(**kw)
+        self.config = self.config.__class__(**kw)
         if cache is not None:
             self.cache = cache
 
@@ -854,17 +855,17 @@ class AliasedRay:
     @cached_property
     def steps(self):
         offset = self.theta + jnp.pi / 4
-        quad = jnp.astype(offset // (jnp.pi / 2), jnp.int8) % 4
+        quad = jnp.astype(offset // (jnp.pi / 2), jnp.int32) % 4
         flip = jnp.where(quad % 3, -1, 1)
         slope = jnp.tan(offset % (jnp.pi / 2) - jnp.pi / 4) * flip
         sign, axis = jnp.where(quad // 2, 1, -1)[None, :], quad % 2
         bias = sign * self.origin[:, axis] % 1
         fp = self.origin[:, 1 - axis] + bias * slope
-        counting = jnp.int16(self.origin[:, axis] - bias * sign)
-        steps = jnp.arange(self.distance, dtype=jnp.int16)[None, None, :]
+        counting = jnp.int32(self.origin[:, axis] - bias * sign)
+        steps = jnp.arange(self.distance, dtype=jnp.int32)[None, None, :]
         indices = counting[..., None] - sign[..., None] * steps
         frac = fp[..., None] + slope[None, :, None] * steps
-        lo = jnp.int16(frac)
+        lo = jnp.int32(frac)
         hi = lo + 1
         axis = axis[None, None, :, None]
         lo = jnp.where(axis, jnp.stack((lo, indices)), jnp.stack((indices, lo)))
