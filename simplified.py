@@ -939,6 +939,7 @@ class AliasedRay:
     def loss(self, x):
         x = x.reshape(3, -1)
         d = jnp.sqrt(jnp.sum((x[:2, :, None] - self.poi) ** 2, 0))
+        # TODO: L2 for optimizer?
         shrinkage = jnp.abs(x[2] - self.radius_mean) / self.radius_std
         # sqrt(count) in the regularization term is a guess
         return (
