@@ -2,10 +2,10 @@
 import pathlib, sys
 local = pathlib.Path(__file__).parents[0]
 sys.path.insert(0, str(local))
-from simplified import Depth, M2
+from detect import Config, Raster
 sys.path.pop(0)
 
-target = M2.target
+target = Config.resolution
 
 import jax
 import jax.numpy as jnp
@@ -13,7 +13,8 @@ import jax.numpy as jnp
 @jax.jit
 def jax_density(x):
     x = x.reshape(target)
-    confidence, coordinates = M2(jnp.array([]), x).depth.binned().bound()
+    predictions = Raster(jnp.array([]), x).refit()
+    confidence, coordinates = predictions.confidences, predictions.bounds
     confidence = jnp.astype(confidence, jnp.float16)
     coordinates /= jnp.tile(jnp.array(target), [1, 2])
     coordinates = jnp.hstack((

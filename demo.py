@@ -9,7 +9,7 @@ from PIL import Image
 import sys, pathlib
 local = pathlib.Path(__file__).parents[0]
 sys.path.insert(0, str(local))
-from simplified import *
+from detect import *
 sys.path.pop(0)
 
 class BlockingDeque:

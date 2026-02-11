@@ -2,7 +2,7 @@ import sys, pathlib
 local = pathlib.Path(__file__).parents[0]
 
 sys.path.insert(0, str(local))
-from simplified import *
+from detect import *
 sys.path.pop(0)
 
 im1 = Demo.file(examples_dir / "BOX_0001.jpg", cache_dir / "box_depth1.npy")
