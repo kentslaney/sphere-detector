@@ -125,7 +125,7 @@ class Config:
     alpha: any = 0.0  # standard deviations above mean for ray start depth
     beta: any = 2.0  # standard deviations below mean for ray start depth
     delta: any = 0.5  # threshold in standard deviations for ray depth jump
-    eta: any = 1.0  # ridge regression coefficient
+    eta: any = 0.1  # ridge regression coefficient
     chi: any = 0.5  # standard deviations above initial mean radius to look
 
 @jax.tree_util.register_pytree_node_class
@@ -940,7 +940,7 @@ class AliasedRay:
         x = x.reshape(3, -1)
         d = jnp.sqrt(jnp.sum((x[:2, :, None] - self.poi) ** 2, 0))
         # TODO: L2 for optimizer?
-        shrinkage = jnp.abs(x[2] - self.radius_mean) / self.radius_std
+        shrinkage = (x[2] - self.radius_mean) ** 2 / self.radius_std
         # sqrt(count) in the regularization term is a guess
         return (
                 jnp.sum(jnp.sqrt(jnp.sum(jnp.where(
