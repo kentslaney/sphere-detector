@@ -657,25 +657,16 @@ class Seives:
         #             or the the common ancestor is the first non-primary
         if level == len(self.stack) - 1:
             return self.stack[level].unshift(self.stack[level].primaries)
-        empty = jnp.zeros((4, 4), dtype=jnp.bool)
-        kernels = \
-            [  [empty.at[0, 0].set(True)
-            ,   empty.at[0, 3].set(True)
-            ,   empty.at[3, 0].set(True)
-            ,   empty.at[3, 3].set(True)
-            ], [empty.at[0, 1:4].set(True)
-            ,   empty.at[0, 0:3].set(True)
-            ,   empty.at[3, 1:4].set(True)
-            ,   empty.at[3, 0:3].set(True)
-            ], [empty.at[1:4, 0].set(True)
-            ,   empty.at[1:4, 3].set(True)
-            ,   empty.at[0:3, 0].set(True)
-            ,   empty.at[0:3, 3].set(True)
-            ], [empty.at[1:4, 3].set(True).at[3, 1:3].set(True)
-            ,   empty.at[1:4, 0].set(True).at[3, 1:3].set(True)
-            ,   empty.at[0:3, 3].set(True).at[0, 1:3].set(True)
-            ,   empty.at[0:3, 0].set(True).at[0, 1:3].set(True)
-            ]  ]
+        kernel_masks = [
+            [0x8000, 0x0008, 0x1000, 0x0001],
+            [0x0888, 0x8880, 0x0111, 0x1110],
+            [0x7000, 0x0007, 0xe000, 0x000e],
+            [0x0117, 0x7110, 0x088e, 0xe880]]
+        kernels = [[
+            jnp.array([[
+                bool(((j >> (n * 4)) & 0xF) & (1 << m))
+                for n in range(3, -1, -1)] for m in range(3, -1, -1)])
+            for j in i] for i in kernel_masks]
         strides = [
                 (slice(0, None, 2), slice(0, None, 2)),
                 (slice(0, None, 2), slice(1, None, 2)),
