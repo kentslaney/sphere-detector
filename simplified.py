@@ -477,14 +477,12 @@ class Bounds:
         y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
         return jnp.int32(y) * x
 
-    # TODO: float16
     @cached_property
     def metric(self):
         # counts ~ area
         # counts ** 1.5 / area / sqrt(scale) ~ sqrt(area / scale)
         # which is resolution invariant
         areas, total = self.area(), self.counts.size
-        # TODO: justify the epsilon term
         return (self.counts ** 1.5) / (
                 areas + self.config.eps * total * self.scale ** 2) / self.scale
 
@@ -908,7 +906,6 @@ class AliasedRay:
     # (2, self.candidates, self.theta.size)
     @cached_property
     def poi(self):
-        # TODO: remove duplicates?
         x0, x1 = self.steps
         y0, y1 = self.adjacent()
         z0, z1 = self.occludes(y0), self.occludes(y1)
@@ -939,7 +936,6 @@ class AliasedRay:
     def loss(self, x):
         x = x.reshape(3, -1)
         d = jnp.sqrt(jnp.sum((x[:2, :, None] - self.poi) ** 2, 0))
-        # TODO: L2 for optimizer?
         shrinkage = (x[2] - self.radius_mean) ** 2 / self.radius_std
         # sqrt(count) in the regularization term is a guess
         return (
@@ -948,7 +944,6 @@ class AliasedRay:
                 self.config.eta * jnp.sum(shrinkage / jnp.sqrt(self.count))) / \
                         self.candidates
 
-    # TODO: apparently refit for im8 doesn't converge
     @jax.jit
     def fit(self):
         init = jnp.concatenate((self.origin, self.radius_mean[:, None]), -1).T

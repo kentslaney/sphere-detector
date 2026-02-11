@@ -1,3 +1,4 @@
+# TODO: float16 internals
 import pathlib, sys
 local = pathlib.Path(__file__).parents[0]
 sys.path.insert(0, str(local))
