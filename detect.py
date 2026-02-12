@@ -925,12 +925,12 @@ class AliasedRay:
     # (3, self.candidates)
     def loss(self, x):
         x = x.reshape(3, -1)
-        d = jnp.sqrt(jnp.sum((x[:2, :, None] - self.poi) ** 2, 0))
+        d = jnp.sqrt(jnp.sum((x[:2][:, :, None] - self.poi) ** 2, 0))
         shrinkage = (x[2] - self.radius_mean) ** 2 / self.radius_std
         # sqrt(count) in the regularization term is a guess
         return (
                 jnp.sum(jnp.sqrt(jnp.sum(jnp.where(
-                    self.oob, 0, (x[2, :, None] - d) ** 2), -1)) / self.count) +
+                    self.oob, 0, (x[2][:, None] - d) ** 2), -1)) / self.count) +
                 self.config.eta * jnp.sum(shrinkage / jnp.sqrt(self.count))) / \
                         self.candidates
 
