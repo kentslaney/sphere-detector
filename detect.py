@@ -936,11 +936,18 @@ class AliasedRay:
 
     @jax.jit
     def fit(self):
+        mt = jnp.array([jnp.nan])
+        return jax.lax.cond(
+                jnp.sum(self.count) > 0, self._fit, lambda: Circles(
+                    self.config, mt, mt, mt, self.confidences, self.count, mt,
+                    jnp.array([5])))
+
+    def _fit(self):
         init = jnp.concatenate((self.origin, self.radius_mean[:, None]), -1).T
         res = minimize(self.loss, jnp.ravel(init), method="BFGS")
         return Circles(
                 self.config, *jnp.unstack(res.x.reshape(3, -1)),
-                self.confidences, self.count, res.fun[None], res.success[None])
+                self.confidences, self.count, res.fun[None], res.status[None])
 
     batched = (
             "origin", "depth_mean", "depth_std", "radius_mean", "radius_std",
@@ -970,12 +977,16 @@ class OptBatch:
 
 class Circles(namedtuple("Circles", (
         "config", "center_0th", "center_1st", "radius",
-        "granularity", "samples", "loss", "converged"))):
+        "granularity", "samples", "loss", "status"))):
     @property
     def bounds(self):
         return jnp.array([
                 self.center_0th - self.radius, self.center_1st - self.radius,
                 self.center_0th + self.radius, self.center_1st + self.radius]).T
+
+    @property
+    def converged(self):
+        return self.status == 0
 
     def readable(self):
         success = jnp.any(self.converged).item()
