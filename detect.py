@@ -125,7 +125,7 @@ class Config:
     alpha: any = 0.0  # standard deviations above mean for ray start depth
     beta: any = 2.0  # standard deviations below mean for ray start depth
     delta: any = 0.5  # threshold in standard deviations for ray depth jump
-    eta: any = 0.1  # ridge regression coefficient
+    eta: any = 0.25  # ridge regression coefficient
     chi: any = 0.5  # standard deviations above initial mean radius to look
 
 @jax.tree_util.register_pytree_node_class
