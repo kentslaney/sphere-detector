@@ -110,13 +110,16 @@ def jax_limit_cache(arg, *excluded, axis=0, maxsize=None):
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["alpha", "beta", "delta", "eps", "eta", "chi"],
-        meta_fields=["resolution", "candidates", "rays"])
+        meta_fields=[
+            "resolution", "candidates", "rays", "extent", "subdivisions"])
 @dataclass(kw_only=True)
 class Config:
     # Raster
-    resolution: any = (392, 518)
-    candidates: any = 16
-    rays: any = 64
+    resolution: any = (392, 518)  # downsampling resolution (or None)
+    subdivisions: any = 8  # minimum number of cells per dimension
+    candidates: any = 16  # TODO: number of curves to trace
+    rays: any = 64  # number of 2d points to fit
+    extent: any = 4  # minimum number of radii per diagonal
 
     # Bounds
     eps: any = 0.1  # density stabilization coefficient
@@ -241,7 +244,8 @@ class Raster:
     def opt(self, candidates=16):
         pred = self.stat(candidates)
         return AliasedRay.from_binstats(
-                self.depth, pred, self.config.rays, self.diag // 4)
+                self.depth, pred, self.config.rays,
+                self.diag // self.config.extent)
 
     @jax_limit_cache('candidates')
     def refit(self, candidates=16):
@@ -478,6 +482,7 @@ class Bounds:
         y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
         return jnp.int32(y) * x
 
+    # TODO: convex mapping for sum to prioritize likely candidates?
     @cached_property
     def metric(self):
         # counts ~ area
@@ -609,8 +614,10 @@ class Seives:
 
     @classmethod
     def create(cls, base, layers=None):
-        layers = int(math.log2(base.counts.size) // 3) if layers is None \
-                else layers - 1
+        layers = int(
+                math.log2(base.counts.size) // 2 -
+                math.log2(base.bounds.config.subdivisions)) \
+                    if layers is None else layers - 1
         out = [base]
         for _ in range(layers):
             out.append(out[-1].sifted())
