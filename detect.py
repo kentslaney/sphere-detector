@@ -880,9 +880,14 @@ class AliasedRay:
 
     def adjacent(self):
         lo, hi = self.steps
-        return (
-            self.depth.at[*lo].get(wrap_negative_indices=False, mode="fill"),
-            self.depth.at[*hi].get(wrap_negative_indices=False, mode="fill"))
+        oob = jnp.array(self.config.resolution)[:, None, None, None]
+        oob_lo = jnp.logical_or(lo < 0, lo >= oob)
+        oob_lo = jnp.logical_and(oob_lo[0], oob_lo[1])
+        oob_hi = jnp.logical_or(hi < 0, hi >= oob)
+        oob_hi = jnp.logical_and(oob_hi[0], oob_hi[1])
+        lo = jnp.where(oob_lo, jnp.nan, self.depth[*lo])
+        hi = jnp.where(oob_hi, jnp.nan, self.depth[*hi])
+        return (lo, hi)
 
     def occludes(self, series):
         hi = self.depth_mean + self.config.alpha * self.depth_std
@@ -895,9 +900,9 @@ class AliasedRay:
         lowers = far - near < -self.config.delta * self.depth_std[:, None, None]
         expected = jnp.arange(self.distance - 1)[None, None] < lim
         edge = jnp.logical_and(expected, jnp.logical_and(valid, lowers))
-        edge = jnp.concatenate(
-                (jnp.zeros(edge.shape[:2] + (1,), dtype=jnp.bool), edge), -1)
-        return jnp.argmax(edge, -1) - 1
+        return jax.lax.reduce_min(jnp.where(
+            edge, jnp.arange(self.distance - 1)[None, None],
+            jnp.array(self.distance)[(None,) * 3]), (2,))
 
     # (2, self.candidates, self.theta.size)
     @cached_property
@@ -913,10 +918,12 @@ class AliasedRay:
             jax.lax.gather(x1[0], z1[..., None], dims, (1, 1, 2)),
             jax.lax.gather(x1[1], z1[..., None], dims, (1, 1, 2))))
         return Trace(
-                jnp.sum(w0 + w1, -1) / 4, jnp.logical_and(z0 >= 0, z1 >= 0))
+                jnp.sum(w0 + w1, -1) / 4,
+                jnp.logical_and(z0 < self.distance, z1 < self.distance))
 
     def fit(self):
-        return Circles(*self.points.fit(), jnp.sum(self.points.valid, 1))
+        samples = jnp.sum(self.points.valid, 1)
+        return Circles(self.config, *self.points.fit(), samples)
 
 class Trace(namedtuple("Trace", ("points", "valid"))):
     @jax.jit
@@ -942,7 +949,13 @@ class Trace(namedtuple("Trace", ("points", "valid"))):
         return a_ + mean[0], b_ + mean[1], jnp.sqrt(c + a_ ** 2 + b_ ** 2)
 
 class Circles(namedtuple("Circles", (
-        "center_0th", "center_1st", "radius", "samples"))):
+        "config", "center_0th", "center_1st", "radius", "samples"))):
+    @property
+    def bounds(self):
+        return jnp.array([
+                self.center_0th - self.radius, self.center_1st - self.radius,
+                self.center_0th + self.radius, self.center_1st + self.radius]).T
+
     @property
     def valid(self):
         return self.samples > 2
@@ -955,3 +968,8 @@ class Circles(namedtuple("Circles", (
                     f"[{i:2d}] ({x:7.1f}, {y:7.1f}) radius: {r:7.2f} "
                     f"n: {samples:2d}")
         print("----")
+
+    @property
+    def confidences(self):
+        # TODO: check how spherical the depth map is
+        return self.samples / self.config.rays
