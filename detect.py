@@ -615,7 +615,7 @@ class Seives:
     @classmethod
     def create(cls, base, layers=None):
         layers = int(
-                math.log2(base.counts.size) // 2 -
+                math.log2(base.counts.size) / 2 -
                 math.log2(base.bounds.config.subdivisions)) \
                     if layers is None else layers - 1
         out = [base]
