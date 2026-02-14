@@ -109,7 +109,7 @@ def jax_limit_cache(arg, *excluded, axis=0, maxsize=None):
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["alpha", "beta", "delta", "eps", "eta", "chi"],
+        data_fields=["alpha", "beta", "delta", "eps", "chi"],
         meta_fields=[
             "resolution", "candidates", "rays", "extent", "subdivisions"])
 @dataclass(kw_only=True)
@@ -128,7 +128,6 @@ class Config:
     alpha: any = 0.0  # standard deviations above mean for ray start depth
     beta: any = 2.0  # standard deviations below mean for ray start depth
     delta: any = 0.5  # threshold in standard deviations for ray depth jump
-    eta: any = 0.25  # ridge regression coefficient
     chi: any = 0.5  # standard deviations above initial mean radius to look
 
 @jax.tree_util.register_pytree_node_class
@@ -249,7 +248,7 @@ class Raster:
 
     @jax_limit_cache('candidates')
     def refit(self, candidates=16):
-        return self.opt(candidates).split().fit()
+        return self.opt(candidates).fit()
 
     def draw_refit(self, fig=None, candidates=16, index=None, label=True):
         fig, ax = self.cropped_background(fig)
@@ -257,7 +256,7 @@ class Raster:
         if index is None:
             stats = self.refit(candidates)
         else:
-            stats = self.opt(index + 1).split().candidates[-1].fit()
+            stats = self.opt(index + 1).candidates[-1].fit()
         color = 'r'
         kw = { 'linewidth': 1, 'edgecolor': color, 'facecolor': 'none' }
         if label is not None:
@@ -893,7 +892,7 @@ class AliasedRay:
         lo, hi, lim = lo[:, None, None], hi[:, None, None], lim[:, None, None]
         near, far = series[..., :-1], series[..., 1:]
         valid = jnp.logical_and(near >= lo, near < hi)
-        lowers = far - near < -self.config.delta * self.depth_std
+        lowers = far - near < -self.config.delta * self.depth_std[:, None, None]
         expected = jnp.arange(self.distance - 1)[None, None] < lim
         edge = jnp.logical_and(expected, jnp.logical_and(valid, lowers))
         edge = jnp.concatenate(
@@ -902,7 +901,7 @@ class AliasedRay:
 
     # (2, self.candidates, self.theta.size)
     @cached_property
-    def poi(self):
+    def points(self):
         x0, x1 = self.steps
         y0, y1 = self.adjacent()
         z0, z1 = self.occludes(y0), self.occludes(y1)
@@ -913,104 +912,46 @@ class AliasedRay:
         w1 = jnp.stack((
             jax.lax.gather(x1[0], z1[..., None], dims, (1, 1, 2)),
             jax.lax.gather(x1[1], z1[..., None], dims, (1, 1, 2))))
-        w = jnp.sum(w0 + w1, -1) / 4
-        z = jnp.logical_or(z0 < 0, z1 < 0)[None]
-        return jnp.where(z, jnp.array([-1, -1])[:, None, None], w)
+        return Trace(
+                jnp.sum(w0 + w1, -1) / 4, jnp.logical_and(z0 >= 0, z1 >= 0))
 
-    @property
-    def unsized(self):
-        return self.poi[jnp.where(self.poi >= 0)].reshape(2, -1)
+    def fit(self):
+        return Circles(*self.points.fit(), jnp.sum(self.points.valid, 1))
 
-    @cached_property
-    def oob(self):
-        return self.poi[:1] < 0
-
-    @cached_property
-    def count(self):
-        return self.theta.size - jnp.sum(self.oob[0], -1)
-
-    # (3, self.candidates)
-    def loss(self, x):
-        x = x.reshape(3, -1)
-        d = jnp.sqrt(jnp.sum((x[:2][:, :, None] - self.poi) ** 2, 0))
-        shrinkage = (x[2] - self.radius_mean) ** 2 / self.radius_std
-        # sqrt(count) in the regularization term is a guess
-        return (
-                jnp.sum(jnp.sqrt(jnp.sum(jnp.where(
-                    self.oob, 0, (x[2][:, None] - d) ** 2), -1)) / self.count) +
-                self.config.eta * jnp.sum(shrinkage / jnp.sqrt(self.count))) / \
-                        self.candidates
-
+class Trace(namedtuple("Trace", ("points", "valid"))):
     @jax.jit
     def fit(self):
-        mt = jnp.array([jnp.nan])
-        return jax.lax.cond(
-                jnp.sum(self.count) > 0, self._fit, lambda: Circles(
-                    self.config, mt, mt, mt, self.confidences, self.count, mt,
-                    jnp.array([5])))
+        mean = jnp.sum(jnp.where(self.valid, self.points, 0), axis=2) / \
+                jnp.sum(self.valid, axis=1)
+        y, x = jnp.unstack(
+                jnp.where(self.valid, self.points - mean[..., None], 0), axis=0)
 
-    def _fit(self):
-        init = jnp.concatenate((self.origin, self.radius_mean[:, None]), -1).T
-        res = minimize(self.loss, jnp.ravel(init), method="BFGS")
-        return Circles(
-                self.config, *jnp.unstack(res.x.reshape(3, -1)),
-                self.confidences, self.count, res.fun[None], res.status[None])
+        a = jnp.stack([2 * y, 2 * x, self.valid], axis=2)
+        b = x ** 2 + y ** 2
 
-    batched = (
-            "origin", "depth_mean", "depth_std", "radius_mean", "radius_std",
-            "confidences")
-    def split(self):
-        res = [None] * self.candidates
-        for i in range(self.candidates):
-            res[i] = self.__class__(
-                    self.config, self.depth,
-                    theta=self.theta, distance=self.distance,
-                    **{k: getattr(self, k)[i:i + 1] for k in self.batched})
-        return OptBatch(self.config, res)
+        at = jnp.transpose(a, (0, 2, 1))
+        ata, atb = at @ a, (at @ b[..., None])[..., 0]
+        cols = jnp.unstack(ata, axis=2)
+        cramer = lambda idx: jnp.stack(
+                cols[:idx] + (atb,) + cols[idx + 1:], axis=2)
 
-@partial(
-        jax.tree_util.register_dataclass,
-        data_fields=["config", "candidates"], meta_fields=[])
-@dataclass
-class OptBatch:
-    config: any
-    candidates: any
+        det = jnp.linalg.det(ata)
+        det = jnp.where(jnp.abs(det) < 1e-10, 1e-10, det)
 
-    def fit(self):
-        res = [candidate.fit() for candidate in self.candidates]
-        return Circles(self.config, *[
-            jnp.concat([getattr(i, field) for i in res])
-            for field in Circles._fields[1:]])
+        a_, b_, c = (jnp.linalg.det(cramer(i)) / det for i in range(3))
+        return a_ + mean[0], b_ + mean[1], jnp.sqrt(c + a_ ** 2 + b_ ** 2)
 
 class Circles(namedtuple("Circles", (
-        "config", "center_0th", "center_1st", "radius",
-        "granularity", "samples", "loss", "status"))):
+        "center_0th", "center_1st", "radius", "samples"))):
     @property
-    def bounds(self):
-        return jnp.array([
-                self.center_0th - self.radius, self.center_1st - self.radius,
-                self.center_0th + self.radius, self.center_1st + self.radius]).T
-
-    @property
-    def converged(self):
-        return self.status == 0
+    def valid(self):
+        return self.samples > 2
 
     def readable(self):
-        success = jnp.any(self.converged).item()
-        it = jnp.nonzero(self.converged)[0] if success else \
-                jnp.nonzero(~jnp.isnan(self.loss))[0]
-        for i in it:
+        for i in jnp.nonzero(self.valid)[0]:
             y, x = self.center_0th[i].item(), self.center_1st[i].item()
-            r, granularity = self.radius[i].item(), self.granularity[i].item()
-            loss, samples = self.loss[i].item(), self.samples[i].item()
+            r, samples = self.radius[i].item(), self.samples[i].item()
             print(
-                    f"[{i:2d}] ({x:6.1f}, {y:6.1f}) radius: {r:6.2f} "
-                    f"score: {granularity:.3e} "
-                    f"-{{n: {samples:2d}}}-> loss: {loss:.3e}")
-        print("---- converged" if success else "^^^^ failed")
-
-    @cached_property
-    def confidences(self):
-        # TODO: adjust with loss & samples
-        return self.granularity
-
+                    f"[{i:2d}] ({x:7.1f}, {y:7.1f}) radius: {r:7.2f} "
+                    f"n: {samples:2d}")
+        print("----")
