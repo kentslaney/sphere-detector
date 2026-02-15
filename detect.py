@@ -933,9 +933,12 @@ class AliasedRay:
                 jnp.logical_and(z0 < self.distance, z1 < self.distance))
 
     def fit(self):
-        # TODO: jnp.sqrt(jnp.mean((jnp.sqrt(dx ** 2 + dy ** 2) - r) ** 2))
         samples = jnp.sum(self.points.valid, 1)
-        return Circles(self.config, *self.points.fit(), samples)
+        (y_, x_, r), (y, x) = self.points.fit(), jnp.unstack(self.points.points)
+        sigma = jnp.sqrt(jnp.sum(jnp.where(self.points.valid, (
+            jnp.sqrt((x - x_[:, None]) ** 2 + (y - y_[:, None]) ** 2)
+            - r[:, None]) ** 2, 0), 1) / samples)
+        return Circles(self.config, y_, x_, r, samples, sigma)
 
 class Trace(namedtuple("Trace", ("points", "valid"))):
     @jax.jit
@@ -961,7 +964,7 @@ class Trace(namedtuple("Trace", ("points", "valid"))):
         return a_ + mean[0], b_ + mean[1], jnp.sqrt(c + a_ ** 2 + b_ ** 2)
 
 class Circles(namedtuple("Circles", (
-        "config", "center_0th", "center_1st", "radius", "samples"))):
+        "config", "center_0th", "center_1st", "radius", "samples", "sigma"))):
     @property
     def bounds(self):
         return jnp.array([
@@ -985,4 +988,5 @@ class Circles(namedtuple("Circles", (
     def confidences(self):
         # TODO: check how spherical the unsquished ray depths are
         # TODO: limit ray casts by either depth jumps or estimated circle bounds
+        # TODO: integrate sigma
         return self.samples / self.config.rays
