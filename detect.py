@@ -249,15 +249,12 @@ class Raster:
 
     @jax_limit_cache('candidates')
     def refit(self, candidates=16):
-        return self.opt(candidates).fit()
+        return self.opt(candidates).fit
 
-    def draw_refit(self, fig=None, candidates=16, index=None, label=True):
+    def draw_refit(self, fig=None, candidates=16, label=True):
         fig, ax = self.cropped_background(fig)
         import matplotlib.patches as patches
-        if index is None:
-            stats = self.refit(candidates)
-        else:
-            stats = self.opt(index + 1).candidates[-1].fit()
+        stats = self.refit(candidates)
         color = 'r'
         kw = { 'linewidth': 1, 'edgecolor': color, 'facecolor': 'none' }
         if label is not None:
@@ -270,7 +267,7 @@ class Raster:
         for y, x, r in it:
             overlay = patches.Circle((x, y), r, **kw)
             ax.add_patch(overlay)
-        if label is not None and index is None:
+        if label is not None:
             ax.autoscale(False)
             for i, (y, x, r) in enumerate(it):
                 ax.plot(
@@ -281,9 +278,9 @@ class Raster:
 
     def draw_candidate(self, index=0, fig=None):
         fig, ax = self.cropped_background(fig)
-        opt = self.opt(index + 1).split().candidates[-1]
-        ax.scatter(*opt.origin.T[::-1], color='r')
-        ax.scatter(*opt.unsized[::-1], color='b')
+        opt = self.opt(index + 1)
+        ax.scatter(*opt.origin[-1].T[::-1], color='r')
+        ax.scatter(*opt.unsized[-1][::-1], color='b')
         return fig
 
     def plot_rays(self, index=0):
@@ -291,17 +288,17 @@ class Raster:
         fig = plt.figure()
         ax0, ax1 = fig.subplots(2, 1)
 
-        opt = self.opt(index + 1).split().candidates[-1]
-        for side in opt.adjacent():
-            for cast in side[0]:
+        opt = self.opt(index + 1)
+        for side in opt.adjacent:
+            for cast in side[-1]:
                 ax0.plot(cast)
         ax0.axhline(opt.depth_mean[0])
         ax0.axhline(opt.depth_mean[0] + self.config.alpha * opt.depth_std[0])
         ax0.axhline(opt.depth_mean[0] - self.config.beta * opt.depth_std[0])
         ax0.axvline(opt.radius_mean[0] + self.config.chi * opt.radius_std[0])
 
-        for side in opt.adjacent():
-            for cast in side[0]:
+        for side in opt.adjacent:
+            for cast in side[-1]:
                 ax1.plot(cast[1:] - cast[:-1])
         ax1.axhline(-self.config.delta * opt.depth_std[0])
         ax1.axvline(opt.radius_mean[0] + self.config.chi * opt.radius_std[0])
@@ -889,6 +886,7 @@ class AliasedRay:
         hi = jnp.where(axis, jnp.stack((hi, indices)), jnp.stack((indices, hi)))
         return (lo, hi)
 
+    @cached_property
     def adjacent(self):
         lo, hi = self.steps
         oob = jnp.array(self.config.resolution)[:, None, None, None]
@@ -900,27 +898,29 @@ class AliasedRay:
         hi = jnp.where(oob_hi, jnp.nan, self.depth[*hi])
         return (lo, hi)
 
-    def occludes(self, series):
-        hi = self.depth_mean + self.config.alpha * self.depth_std
-        lo = self.depth_mean - self.config.beta * self.depth_std
-        lim = self.radius_mean + self.config.chi * self.radius_std
+    @cached_property
+    def occludes(self):
+        res, ax_oxx = [None, None], (slice(None), None, None)
+        for i, series in enumerate(self.adjacent):
+            hi = self.depth_mean + self.config.alpha * self.depth_std
+            lo = self.depth_mean - self.config.beta * self.depth_std
+            lim = self.radius_mean + self.config.chi * self.radius_std
 
-        lo, hi, lim = lo[:, None, None], hi[:, None, None], lim[:, None, None]
-        near, far = series[..., :-1], series[..., 1:]
-        valid = jnp.logical_and(near >= lo, near < hi)
-        lowers = far - near < -self.config.delta * self.depth_std[:, None, None]
-        expected = jnp.arange(self.distance - 1)[None, None] < lim
-        edge = jnp.logical_and(expected, jnp.logical_and(valid, lowers))
-        return jax.lax.reduce_min(jnp.where(
-            edge, jnp.arange(self.distance - 1)[None, None],
-            jnp.array(self.distance)[(None,) * 3]), (2,))
+            lo, hi, lim = lo[ax_oxx], hi[ax_oxx], lim[ax_oxx]
+            near, far = series[..., :-1], series[..., 1:]
+            valid = jnp.logical_and(near >= lo, near < hi)
+            lowers = far - near < -self.config.delta * self.depth_std[ax_oxx]
+            expected = jnp.arange(self.distance - 1)[None, None] < lim
+            edge = jnp.logical_and(expected, jnp.logical_and(valid, lowers))
+            res[i] = jax.lax.reduce_min(jnp.where(
+                edge, jnp.arange(self.distance - 1)[None, None],
+                jnp.array(self.distance)[(None,) * 3]), (2,))
+        return tuple(res)
 
     # (2, self.candidates, self.theta.size)
     @cached_property
     def points(self):
-        x0, x1 = self.steps
-        y0, y1 = self.adjacent()
-        z0, z1 = self.occludes(y0), self.occludes(y1)
+        (x0, x1), (y0, y1), (z0, z1) = self.steps, self.adjacent, self.occludes
         dims = jax.lax.GatherDimensionNumbers((2,), (), (2,), (0, 1), (0, 1))
         w0 = jnp.stack((
             jax.lax.gather(x0[0], z0[..., None], dims, (1, 1, 2)),
@@ -932,6 +932,7 @@ class AliasedRay:
                 jnp.sum(w0 + w1, -1) / 4,
                 jnp.logical_and(z0 < self.distance, z1 < self.distance))
 
+    @cached_property
     def fit(self):
         samples = jnp.sum(self.points.valid, 1)
         (y_, x_, r), (y, x) = self.points.fit(), jnp.unstack(self.points.points)
@@ -939,6 +940,24 @@ class AliasedRay:
             jnp.sqrt((x - x_[:, None]) ** 2 + (y - y_[:, None]) ** 2)
             - r[:, None]) ** 2, 0), 1) / samples)
         return Circles(self.config, y_, x_, r, samples, sigma)
+
+    @cached_property
+    def samples(self):
+        res = [None, None]
+        for i, series in enumerate(self.steps):
+            y, x = jnp.unstack(series)
+            outside = self.fit.radius[:, None, None] ** 2 < (
+                    (self.fit.center_0th[:, None, None] - y) ** 2 +
+                    (self.fit.center_1st[:, None, None] - x) ** 2)
+            oob = jnp.logical_or(outside, jnp.logical_or(
+                    y >= self.config.resolution[0],
+                    x >= self.config.resolution[1]))
+            out = jax.lax.reduce_min(jnp.where(
+                oob, jnp.arange(self.distance)[None, None],
+                jnp.array(self.distance)[(None,) * 3]), (2,))
+            res[i] = jnp.where(
+                    self.occludes[i] < self.distance, self.occludes[i], out)
+        return tuple(res)
 
 class Trace(namedtuple("Trace", ("points", "valid"))):
     @jax.jit
@@ -973,7 +992,7 @@ class Circles(namedtuple("Circles", (
 
     @property
     def valid(self):
-        return self.samples > 2
+        return self.samples > 3  # avoid vacantly 0 RMSE
 
     def readable(self):
         for i in jnp.nonzero(self.valid)[0]:
@@ -986,7 +1005,6 @@ class Circles(namedtuple("Circles", (
 
     @property
     def confidences(self):
-        # TODO: check how spherical the unsquished ray depths are
-        # TODO: limit ray casts by either depth jumps or estimated circle bounds
+        # TODO: check how spherical the unsquished ray sample depths are
         # TODO: integrate sigma
         return self.samples / self.config.rays
