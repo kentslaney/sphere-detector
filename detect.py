@@ -922,6 +922,7 @@ class AliasedRay:
                 jnp.logical_and(z0 < self.distance, z1 < self.distance))
 
     def fit(self):
+        # TODO: jnp.sqrt(jnp.mean((jnp.sqrt(dx ** 2 + dy ** 2) - r) ** 2))
         samples = jnp.sum(self.points.valid, 1)
         return Circles(self.config, *self.points.fit(), samples)
 
@@ -971,5 +972,5 @@ class Circles(namedtuple("Circles", (
 
     @property
     def confidences(self):
-        # TODO: check how spherical the depth map is
+        # TODO: check how spherical the ray depths are
         return self.samples / self.config.rays
