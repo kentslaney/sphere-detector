@@ -117,7 +117,7 @@ class Config:
     # Raster
     resolution: any = (392, 518)  # downsampling resolution (or None)
     subdivisions: any = 8  # minimum number of cells per dimension
-    candidates: any = 16  # TODO: number of curves to trace
+    candidates: any = 16  # number of curves to trace
     rays: any = 64  # number of 2d points to fit
     extent: any = 4  # minimum number of radii per diagonal
 
@@ -135,7 +135,8 @@ class Config:
 class Raster:
     config = Config()
     model = Da2('vits')
-    f_35mm = None
+
+    candidates_default = config.candidates
 
     def tree_flatten(self):
         return (jnp.array(self.full), self.cache, self.config), None
@@ -215,7 +216,7 @@ class Raster:
     def cropped_background(self, fig=None):
         return poplt(fig, lambda ax: ax.imshow(self.cropped()))
 
-    def draw_sifted(self, fig=None, candidates=16, color='r'):
+    def draw_sifted(self, fig=None, candidates=candidates_default, color='r'):
         fig, ax = self.cropped_background(fig)
         import matplotlib.patches as patches
         _, bboxes = self.seives.bound(candidates)
@@ -229,10 +230,10 @@ class Raster:
         return fig
 
     @jax_limit_cache('candidates')
-    def stat(self, candidates=16):
+    def stat(self, candidates=candidates_default):
         return self.seives.stat(candidates)
 
-    def draw_centers(self, fig=None, candidates=16):
+    def draw_centers(self, fig=None, candidates=candidates_default):
         fig, ax = self.cropped_background(fig)
         pred = self.stat(candidates)
         ax.scatter(*pred.mean.centers.T[::-1], color='b')
@@ -241,17 +242,17 @@ class Raster:
         return fig
 
     @jax_limit_cache('candidates', '.depth', '.theta')
-    def opt(self, candidates=16):
+    def opt(self, candidates=candidates_default):
         pred = self.stat(candidates)
         return AliasedRay.from_binstats(
                 self.depth, pred, self.config.rays,
                 self.diag // self.config.extent)
 
     @jax_limit_cache('candidates')
-    def refit(self, candidates=16):
+    def refit(self, candidates=candidates_default):
         return self.opt(candidates).fit
 
-    def draw_refit(self, fig=None, candidates=16, label=True):
+    def draw_refit(self, fig=None, candidates=candidates_default, label=True):
         fig, ax = self.cropped_background(fig)
         import matplotlib.patches as patches
         stats = self.refit(candidates)
@@ -732,7 +733,7 @@ class Seives:
         return self.stack[level].unshift(candidates)
 
     @jax.jit(static_argnames=['candidates'])
-    def nominate(self, candidates=16):
+    def nominate(self, candidates):
         values = jnp.ravel(self.stack[-1].bounds.metric)
         suppressors = range(len(self.stack) - 1, 0, -1)
         for i, layer in zip(suppressors, self.stack[-2::-1]):
