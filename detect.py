@@ -109,7 +109,7 @@ def jax_limit_cache(arg, *excluded, axis=0, maxsize=None):
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["alpha", "beta", "delta", "eps", "chi"],
+        data_fields=["alpha", "beta", "gamma", "delta", "eps", "chi"],
         meta_fields=[
             "resolution", "candidates", "rays", "extent", "subdivisions"])
 @dataclass(kw_only=True)
@@ -128,6 +128,7 @@ class Config:
     alpha: any = 0.0  # standard deviations above mean for ray start depth
     # mean height vs center: 2 / 3 * R and standard deviation: sqrt(2) / 6 * R
     beta: any = 3.0  # standard deviations below mean for ray start depth
+    gamma: any = 0.2  # interpolation value between median and mean for w
     delta: any = 0.5  # threshold in standard deviations for ray depth jump
     chi: any = 0.5  # standard deviations above initial mean radius to look
 
@@ -793,6 +794,14 @@ class FlatStat:
     def offset(self, origin):
         return self.__class__(self.stats.at[0, :2].subtract(origin))
 
+    @cached_property
+    def mode(self):
+        # assumes that the stats are a gamma distribution (right skew)
+        theta = tuple(i / j for i, j in zip(self.var, self.mean))
+        alpha = tuple(i / j for i, j in zip(self.mean, theta))
+        return namedtuple('Modes', self.order)(*(
+            jnp.where(i >= 1, (i - 1) * j, 0) for i, j in zip(alpha, theta)))
+
 class SiftedMeans(namedtuple('Means', FlatStat.order)):
     @property
     def centers(self):
@@ -857,12 +866,14 @@ class AliasedRay:
 
     @classmethod
     def from_binstats(cls, depth, stats, rays, distance):
-        print(stats.mean.w, stats.std.w)
+        w = (
+                stats.mean.w * depth.config.gamma +
+                stats.mode.w * (1 - depth.config.gamma))
         return cls(
                 depth.config, depth.depth, stats.mean.centers,
                 jnp.linspace(0, 2 * jnp.pi, rays, endpoint=False), distance,
                 stats.mean.depth, stats.std.depth,
-                stats.mean.radius, stats.std.radius, stats.mean.w)
+                stats.mean.radius, stats.std.radius, w)
 
     @property
     def candidates(self):
