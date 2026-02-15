@@ -857,6 +857,7 @@ class AliasedRay:
 
     @classmethod
     def from_binstats(cls, depth, stats, rays, distance):
+        print(stats.mean.w, stats.std.w)
         return cls(
                 depth.config, depth.depth, stats.mean.centers,
                 jnp.linspace(0, 2 * jnp.pi, rays, endpoint=False), distance,
@@ -959,6 +960,14 @@ class AliasedRay:
             res[i] = jnp.where(
                     self.occludes[i] < self.distance, self.occludes[i], out)
         return tuple(res)
+
+    def debug(self, index=0):
+        import matplotlib.pyplot as plt
+        depths = jnp.concat(self.adjacent, axis=1) * self.w[:, None, None]
+        lengths = jnp.concat(self.samples, axis=1)
+        for i in range(lengths.shape[1]):
+            plt.plot(depths[index][i][:lengths[index][i]])
+        plt.show()
 
 class Trace(namedtuple("Trace", ("points", "valid"))):
     @jax.jit
