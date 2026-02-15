@@ -126,7 +126,8 @@ class Config:
 
     # AliasedRay
     alpha: any = 0.0  # standard deviations above mean for ray start depth
-    beta: any = 2.0  # standard deviations below mean for ray start depth
+    # mean height vs center: 2 / 3 * R and standard deviation: sqrt(2) / 6 * R
+    beta: any = 3.0  # standard deviations below mean for ray start depth
     delta: any = 0.5  # threshold in standard deviations for ray depth jump
     chi: any = 0.5  # standard deviations above initial mean radius to look
 
@@ -973,4 +974,5 @@ class Circles(namedtuple("Circles", (
     @property
     def confidences(self):
         # TODO: check how spherical the ray depths are
+        # TODO: limit ray casts by either depth jumps or estimated circle bounds
         return self.samples / self.config.rays
