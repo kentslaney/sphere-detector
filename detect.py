@@ -385,6 +385,12 @@ class Depth:
         return jax.lax.min(bound, p)
 
     @cached_property
+    def w(self):
+        da2, db2 = self.rotated[..., 0, 0], self.rotated[..., 1, 1]
+        ge1 = jnp.where(self.inwards, da2 / db2, 1)
+        return jnp.sqrt(ge1 - 1) / self.norm
+
+    @cached_property
     def masked(self):
         return jnp.where(self.inwards[..., None], self.centers, -1)
 
@@ -407,7 +413,8 @@ class Depth:
                 indices.stat(centers[:, 0]),
                 indices.stat(centers[:, 1]),
                 indices.stat(jnp.ravel(self.radii)),
-                indices.stat(jnp.ravel(self.depth)))
+                indices.stat(jnp.ravel(self.depth)),
+                indices.stat(jnp.ravel(self.w)))
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -529,7 +536,8 @@ class Bounds:
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["bounds", "center_0th", "center_1st", "radius", "depth"],
+        data_fields=[
+            "bounds", "center_0th", "center_1st", "radius", "depth", "w"],
         meta_fields=["level"])
 @dataclass
 class Bins:
@@ -539,6 +547,7 @@ class Bins:
     center_1st: any
     radius: any
     depth: any
+    w: any
 
     @property
     def counts(self):
@@ -555,7 +564,8 @@ class Bins:
                 self.center_0th.merge(bounds.offset),
                 self.center_1st.merge(bounds.offset),
                 self.radius.merge(bounds.offset),
-                self.depth.merge(bounds.offset))
+                self.depth.merge(bounds.offset),
+                self.w.merge(bounds.offset))
 
     @cached_property
     def primaries(self):
@@ -592,7 +602,7 @@ class Bins:
         upscaled = jnp.repeat(jnp.repeat(inc, 2, 0), 2, 1)
         return upscaled * self.primaries
 
-    stats = ('center_0th', 'center_1st', 'radius', 'depth')
+    stats = ('center_0th', 'center_1st', 'radius', 'depth', 'w')
     # means then variances
     def stat(self):
         out = []
@@ -829,7 +839,7 @@ class BinSum:
         jax.tree_util.register_dataclass,
         data_fields=[
             "config", "depth", "origin", "theta", "depth_mean", "depth_std",
-            "radius_mean", "radius_std", "confidences"],
+            "radius_mean", "radius_std", "w"],
         meta_fields=["distance"])
 @dataclass
 class AliasedRay:
@@ -842,7 +852,7 @@ class AliasedRay:
     depth_std: any
     radius_mean: any
     radius_std: any
-    confidences: any
+    w: any
 
     def __post_init__(self, *a, **kw):
         assert self.origin.ndim == 2 and self.origin.shape[-1] == 2
@@ -853,7 +863,7 @@ class AliasedRay:
                 depth.config, depth.depth, stats.mean.centers,
                 jnp.linspace(0, 2 * jnp.pi, rays, endpoint=False), distance,
                 stats.mean.depth, stats.std.depth,
-                stats.mean.radius, stats.std.radius, stats.confidences)
+                stats.mean.radius, stats.std.radius, stats.mean.w)
 
     @property
     def candidates(self):
@@ -973,6 +983,6 @@ class Circles(namedtuple("Circles", (
 
     @property
     def confidences(self):
-        # TODO: check how spherical the ray depths are
+        # TODO: check how spherical the unsquished ray depths are
         # TODO: limit ray casts by either depth jumps or estimated circle bounds
         return self.samples / self.config.rays
