@@ -3,15 +3,14 @@ matplotlib
 pillow
 pillow_heif
 -e ./assets/coremltools
-scipy
-armpit
-sympy
 opencv-python
 torch
 torchvision
-jupyterlab-vim
 # jax[cuda13]
 jax
 -e ./assets/stablehlo_coreml
 tqdm
-nltk
+# development tools
+armpit
+scipy
+sympy
