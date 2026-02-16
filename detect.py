@@ -895,7 +895,8 @@ class AliasedRay:
 
     @cached_property
     def surface(self):
-        # TODO: only fit the first 80% and decrease penalty for consistently off
+        # TODO: small angle rotate so the center gradient is flat
+        # TODO: circle center should be -(sqrt(2) + ln(1 + sqrt(2))) / 4
         lim, ax_oxx = self.samples[..., None], (slice(None), None, None)
         x, r = jnp.arange(self.distance)[None, None], self.fit.radius[ax_oxx]
         y = jnp.concat(self.adjacent, axis=1) * self.w[ax_oxx]
