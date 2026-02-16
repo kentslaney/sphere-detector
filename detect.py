@@ -63,16 +63,6 @@ class Da2:
         import numpy as np
         return jnp.array(self.model.infer_image(np.array(im)))
 
-def poplt(x=None, init=None):
-    import matplotlib.pyplot as plt
-    if x is not None:
-        return x, x.gca()
-    fig = plt.figure()
-    ax = fig.subplots()
-    if init is not None:
-        init(ax)
-    return fig, ax
-
 def jax_limit_cache(arg, *excluded, axis=0, maxsize=None):
     cache = OrderedDict()
     def decorator(f):
@@ -107,6 +97,18 @@ def jax_limit_cache(arg, *excluded, axis=0, maxsize=None):
         return wrapper
     return decorator
 
+def lazy_default(**lazy):
+    def decorator(f):
+        sig = inspect.signature(f)
+        @wraps(f)
+        def wrapper(*a, **kw):
+            bound = sig.bind_partial(*a, **kw)
+            return f(*a, **kw, **{
+                k: v(*a, **kw) for k, v in lazy.items()
+                if k not in bound.arguments})
+        return wrapper
+    return decorator
+
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["alpha", "beta", "gamma", "delta", "eps", "chi"],
@@ -136,8 +138,6 @@ class Config:
 class Raster:
     config = Config()
     model = Da2('vits')
-
-    candidates_default = config.candidates
 
     def tree_flatten(self):
         return (jnp.array(self.full), self.cache, self.config), None
@@ -214,92 +214,18 @@ class Raster:
     def seives(self):
         return Seives.create(self.depth.binned())
 
-    def cropped_background(self, fig=None):
-        return poplt(fig, lambda ax: ax.imshow(self.cropped()))
-
-    def draw_sifted(self, fig=None, candidates=candidates_default, color='r'):
-        fig, ax = self.cropped_background(fig)
-        import matplotlib.patches as patches
-        _, bboxes = self.seives.bound(candidates)
-        kw = { 'linewidth': 1, 'edgecolor': color, 'facecolor': 'none' }
-        for i, x in enumerate(jnp.unstack(bboxes)):
-            rect = patches.Rectangle(x[1::-1], *(x[:1:-1] - x[1::-1]), **kw)
-            ax.add_patch(rect)
-            ax.annotate(
-                    str(i), x[1::-1], xytext=(1, -1), textcoords="offset points",
-                    va='top', ha='left', color=color)
-        return fig
-
+    @lazy_default(candidates=lambda this, *a, **kw: this.config.candidates)
     @jax_limit_cache('candidates')
-    def stat(self, candidates=candidates_default):
+    def stat(self, candidates):
         return self.seives.stat(candidates)
 
-    def draw_centers(self, fig=None, candidates=candidates_default):
-        fig, ax = self.cropped_background(fig)
-        pred = self.stat(candidates)
-        ax.scatter(*pred.mean.centers.T[::-1], color='b')
-        for i, (y, x) in enumerate(pred.mean.centers):
-            ax.annotate(str(i), (x, y), color='b')
-        return fig
-
+    @lazy_default(candidates=lambda this, *a, **kw: this.config.candidates)
     @jax_limit_cache('candidates', '.depth', '.theta')
-    def opt(self, candidates=candidates_default):
+    def opt(self, candidates):
         pred = self.stat(candidates)
         return AliasedRay.from_binstats(
                 self.depth, pred, self.config.rays,
                 self.diag // self.config.extent)
-
-    def draw_refit(self, fig=None, candidates=candidates_default, label=True):
-        fig, ax = self.cropped_background(fig)
-        import matplotlib.patches as patches
-        stats = self.opt(candidates).fit
-        color = 'r'
-        kw = { 'linewidth': 1, 'edgecolor': color, 'facecolor': 'none' }
-        if label is not None:
-            thetas = jax.random.uniform(
-                    jax.random.key(label),
-                    stats.radius.shape, maxval=2 * jnp.pi)
-        it = jnp.unstack(
-                jnp.stack((stats.center_0th, stats.center_1st, stats.radius)),
-                axis=1)
-        for y, x, r in it:
-            ax.add_patch(patches.Circle((x, y), r, **kw))
-        if label is not None:
-            ax.autoscale(False)
-            for i, (y, x, r) in enumerate(it):
-                ax.plot(
-                        [x, x + jnp.cos(thetas[i]) * r],
-                        [y, y + jnp.sin(thetas[i]) * r], color=color)
-                ax.annotate(str(i), (x, y), color=color)
-        return fig
-
-    def draw_candidate(self, index=0, fig=None):
-        fig, ax = self.cropped_background(fig)
-        opt = self.opt(index + 1)
-        ax.scatter(*opt.origin[-1].T[::-1], color='r')
-        ax.scatter(*opt.unsized[-1][::-1], color='b')
-        return fig
-
-    def plot_rays(self, index=0):
-        import matplotlib.pyplot as plt
-        fig = plt.figure()
-        ax0, ax1 = fig.subplots(2, 1)
-
-        opt = self.opt(index + 1)
-        for side in opt.adjacent:
-            for cast in side[-1]:
-                ax0.plot(cast)
-        ax0.axhline(opt.depth_mean[0])
-        ax0.axhline(opt.depth_mean[0] + self.config.alpha * opt.depth_std[0])
-        ax0.axhline(opt.depth_mean[0] - self.config.beta * opt.depth_std[0])
-        ax0.axvline(opt.radius_mean[0] + self.config.chi * opt.radius_std[0])
-
-        for side in opt.adjacent:
-            for cast in side[-1]:
-                ax1.plot(cast[1:] - cast[:-1])
-        ax1.axhline(-self.config.delta * opt.depth_std[0])
-        ax1.axvline(opt.radius_mean[0] + self.config.chi * opt.radius_std[0])
-        return fig
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -981,40 +907,6 @@ class AliasedRay:
             0), (1, 2)) / jnp.sum(lim, (1, 2)))
         return Surface(self.config, self.fit, y_c / self.w, rmse)
 
-    def plot_depths(self, index=0, name=None):
-        y, (_, _, y_c, rmse) = jnp.concat(self.adjacent, axis=1), self.surface
-        y, y_c = y * self.w[:, None, None], y_c * self.w
-
-        import matplotlib.pyplot as plt
-        fig = plt.figure()
-        ax = fig.subplots()
-        for i in range(self.samples.shape[1]):
-            ax.plot(y[index][i][:self.samples[index][i]], color='b')
-
-        ax.axvline(x=self.fit.radius[index], color='g')
-        import matplotlib.patches as patches
-        kw = { 'linewidth': 2, 'edgecolor': 'r', 'facecolor': 'none' }
-        ax.add_patch(patches.Circle(
-            (0, y_c[index]), self.fit.radius[index], zorder=5, **kw))
-
-        name = " " if name is None else f" {name} "
-        msg = (
-            f'Surface RMSE: {rmse[index]:.2f}\n'
-            f'Edge RMSE: {self.fit.rmse[index]:0.2f}\n'
-            f'n: {self.fit.samples[index]} / {self.surface.config.rays}'
-        )
-        ax.text(
-                0.05, 0.05, msg,
-                transform=plt.gca().transAxes,
-                verticalalignment='bottom',
-                horizontalalignment='left',
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.5))
-        ax.set_title(f"Surface Depths for{name}Sphere Candidate {index}")
-        ax.set_xlabel("Distance from Initial Center (pixels)")
-        ax.set_ylabel("Slice Depth (pixels)")
-
-        return fig
-
 class Trace(namedtuple("Trace", ("points", "valid"))):
     @jax.jit
     def fit(self):
@@ -1052,15 +944,4 @@ class Circles(namedtuple("Circles", (
 
 class Surface(namedtuple("Surface", ("config", "edge", "center_2nd", "rmse"))):
     # TODO: confidences, possibly exp(-RMSE)
-    def readable(self):
-        for i in jnp.nonzero(self.edge.valid)[0]:
-            print(
-                    f"[{i:2d}] "
-                    f"({self.edge.center_1st[i]:7.1f}, "
-                    f"{self.edge.center_0th[i]:7.1f}) "
-                    f"r: {self.edge.radius[i]:7.2f} "
-                    f"n: {self.edge.samples[i]:2d} "
-                    f"edge: {self.edge.rmse[i]:7.3f} "
-                    f"surface: {self.rmse[i]:7.3f} ")
-        print("----")
-
+    pass
