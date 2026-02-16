@@ -10,13 +10,8 @@ opencv-python
 torch
 torchvision
 jupyterlab-vim
-tensorflow_datasets
-# tensorflow
-# tensorflow-metal
-tensorflow-cpu
-jax[cuda13]
-# jax
-transformers
+# jax[cuda13]
+jax
 -e ./assets/stablehlo_coreml
 tqdm
 nltk

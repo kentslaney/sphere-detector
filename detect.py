@@ -948,10 +948,10 @@ class AliasedRay:
     def fit(self):
         samples = jnp.sum(self.points.valid, 1)
         (y_, x_, r), (y, x) = self.points.fit(), jnp.unstack(self.points.points)
-        sigma = jnp.sqrt(jnp.sum(jnp.where(self.points.valid, (
+        rmse = jnp.sqrt(jnp.sum(jnp.where(self.points.valid, (
             jnp.sqrt((x - x_[:, None]) ** 2 + (y - y_[:, None]) ** 2)
             - r[:, None]) ** 2, 0), 1) / samples)
-        return Circles(self.config, y_, x_, r, samples, sigma)
+        return Circles(y_, x_, r, samples, rmse)
 
     @cached_property
     def samples(self):
@@ -969,25 +969,55 @@ class AliasedRay:
                 jnp.array(self.distance)[(None,) * 3]), (2,))
             res[i] = jnp.where(
                     self.occludes[i] < self.distance, self.occludes[i], out)
-        return tuple(res)
+        return jnp.concat(res, axis=1)
 
-    def debug(self, index=0):
+    @cached_property
+    def surface(self):
+        # TODO: only fit the first 80% (?)
+        lim, ax_oxx = self.samples[..., None], (slice(None), None, None)
+        x, r = jnp.arange(self.distance)[None, None], self.fit.radius[ax_oxx]
+        y = jnp.concat(self.adjacent, axis=1) * self.w[ax_oxx]
+        y_c = jnp.sum(jnp.where(
+            x < lim, y - jnp.sqrt(r ** 2 - jnp.minimum(x, r) ** 2),
+            0), (1, 2)) / jnp.sum(lim, (1, 2))
+        rmse = jnp.sqrt(jnp.sum(jnp.where(
+            x < lim, (jnp.sqrt(x ** 2 + (y - y_c[ax_oxx]) ** 2) - r) ** 2,
+            0), (1, 2)) / jnp.sum(lim, (1, 2)))
+        return Surface(self.config, self.fit, y_c / self.w, rmse)
+
+    def plot_depths(self, index=0, name=None):
+        y, (_, _, y_c, rmse) = jnp.concat(self.adjacent, axis=1), self.surface
+        y, y_c = y * self.w[:, None, None], y_c * self.w
+
         import matplotlib.pyplot as plt
-        y = jnp.concat(self.adjacent, axis=1) * self.w[:, None, None]
-        lim = jnp.concat(self.samples, axis=1)
-        x = jnp.arange(self.distance)
-        # TODO: axes, mask x >= lim
-        # y_c = jnp.mean(y - jnp.sqrt(r ** 2 - jax.lax.minimum(x, r) ** 2))
-        # err = jnp.sqrt(jnp.mean((jnp.sqrt(x ** 2 + (y - y_c) ** 2) - r) ** 2))
-        for i in range(lim.shape[1]):
-            plt.plot(y[index][i][:lim[index][i]], color='b')
+        fig = plt.figure()
+        ax = fig.subplots()
+        for i in range(self.samples.shape[1]):
+            ax.plot(y[index][i][:self.samples[index][i]], color='b')
 
-        plt.axvline(x=self.fit.radius[index], color='g')
+        ax.axvline(x=self.fit.radius[index], color='g')
         import matplotlib.patches as patches
-        kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
-        # plt.add_patch(patches.Circle((0, y_c), r, **kw))
+        kw = { 'linewidth': 2, 'edgecolor': 'r', 'facecolor': 'none' }
+        ax.add_patch(patches.Circle(
+            (0, y_c[index]), self.fit.radius[index], zorder=5, **kw))
 
-        plt.show()
+        name = " " if name is None else f" {name} "
+        msg = (
+            f'Surface RMSE: {rmse[index]:.2f}\n'
+            f'Edge RMSE: {self.fit.rmse[index]:0.2f}\n'
+            f'n: {self.fit.samples[index]} / {self.surface.config.rays}'
+        )
+        ax.text(
+                0.05, 0.05, msg,
+                transform=plt.gca().transAxes,
+                verticalalignment='bottom',
+                horizontalalignment='left',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.5))
+        ax.set_title(f"Surface Depths for{name}Sphere Candidate {index}")
+        ax.set_xlabel("Distance from Initial Center (pixels)")
+        ax.set_ylabel("Slice Depth (pixels)")
+
+        return fig
 
 class Trace(namedtuple("Trace", ("points", "valid"))):
     @jax.jit
@@ -1013,7 +1043,7 @@ class Trace(namedtuple("Trace", ("points", "valid"))):
         return a_ + mean[0], b_ + mean[1], jnp.sqrt(c + a_ ** 2 + b_ ** 2)
 
 class Circles(namedtuple("Circles", (
-        "config", "center_0th", "center_1st", "radius", "samples", "sigma"))):
+        "center_0th", "center_1st", "radius", "samples", "rmse"))):
     @property
     def bounds(self):
         return jnp.array([
@@ -1026,15 +1056,12 @@ class Circles(namedtuple("Circles", (
 
     def readable(self):
         for i in jnp.nonzero(self.valid)[0]:
-            y, x = self.center_0th[i].item(), self.center_1st[i].item()
-            r, samples = self.radius[i].item(), self.samples[i].item()
             print(
-                    f"[{i:2d}] ({x:7.1f}, {y:7.1f}) radius: {r:7.2f} "
-                    f"n: {samples:2d}")
+                    f"[{i:2d}] "
+                    f"({self.center_1st[i]:7.1f}, {self.center_0th[i]:7.1f}) "
+                    f"radius: {self.radius[i]:7.2f} n: {self.samples[i]:2d}")
         print("----")
 
-    @property
-    def confidences(self):
-        # TODO: check how spherical the unsquished ray sample depths are
-        # TODO: integrate sigma
-        return self.samples / self.config.rays
+class Surface(namedtuple("Surface", ("config", "edge", "center_2nd", "rmse"))):
+    # TODO: confidences
+    pass
