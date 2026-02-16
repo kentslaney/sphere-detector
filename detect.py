@@ -942,6 +942,8 @@ class Circles(namedtuple("Circles", (
     def valid(self):
         return self.samples > 3  # avoid vacantly 0 RMSE
 
-class Surface(namedtuple("Surface", ("config", "edge", "center_2nd", "rmse"))):
-    # TODO: confidences, possibly exp(-RMSE)
-    pass
+class Surface(namedtuple("Surface", (
+        "config", "edge", "center_2nd", "rmse"))):
+    @property
+    def revolutions(self):
+        return jnp.concat((jnp.linspace(0, 1, self.config.rays),) * 2)

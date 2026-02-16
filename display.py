@@ -89,7 +89,6 @@ class Example:
         return fig
 
     def plot_rays(self, index=0):
-        import matplotlib.pyplot as plt
         fig = plt.figure()
         ax0, ax1 = fig.subplots(2, 1)
 
@@ -109,16 +108,18 @@ class Example:
         ax1.axvline(opt.radius_mean[0] + self.config.chi * opt.radius_std[0])
         return fig
 
-    def plot_depths(self, index=0):
+    def plot_depths(self, index=0, ax=None):
         this = self.opt()
-        y, (_, _, y_c, rmse) = jnp.concat(this.adjacent, axis=1), this.surface
-        y, y_c = y * this.w[:, None, None], y_c * this.w
+        y = jnp.concat(this.adjacent, axis=1) * this.w[:, None, None]
+        y_c, rmse = this.surface.center_2nd * this.w, this.surface.rmse
 
-        import matplotlib.pyplot as plt
-        fig = plt.figure()
-        ax = fig.subplots()
-        for i in range(this.samples.shape[1]):
-            ax.plot(y[index][i][:this.samples[index][i]], color='b')
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.subplots()
+
+        cmap, taus = plt.get_cmap('twilight'), this.surface.revolutions
+        for i in range(0, this.samples.shape[1], 1):
+            ax.plot(y[index][i][:this.samples[index][i]], color=cmap(taus[i]))
 
         ax.axvline(x=this.fit.radius[index], color='g')
         import matplotlib.patches as patches
@@ -134,7 +135,7 @@ class Example:
         )
         ax.text(
                 0.05, 0.05, msg,
-                transform=plt.gca().transAxes,
+                transform=ax.transAxes,
                 verticalalignment='bottom',
                 horizontalalignment='left',
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.5))
@@ -142,20 +143,22 @@ class Example:
         ax.set_xlabel("Distance from Initial Center (pixels)")
         ax.set_ylabel("Slice Depth (pixels)")
 
-        return fig
+        if ax is None:
+            return fig
 
     def debug(self):
         this = self.opt().surface
         res = []
         for i in jnp.nonzero(this.edge.valid)[0]:
-            res.append([j.item() for j in [
-                    i,
-                    this.edge.center_1st[i],
-                    this.edge.center_0th[i],
-                    this.edge.radius[i],
-                    this.edge.samples[i],
-                    this.edge.rmse[i],
-                    this.rmse[i]]])
+            res.append([j.item() if hasattr(j, "item") else j for j in [
+                i,
+                this.edge.center_1st[i],
+                this.edge.center_0th[i],
+                this.edge.radius[i],
+                this.edge.samples[i],
+                this.edge.rmse[i],
+                this.rmse[i],
+            ]])
         if self.name is not None:
             res[0] = [self.name] + res[0]
             for i in range(1, len(res)):
@@ -173,7 +176,8 @@ class Readable:
         self.value = self.value[:-1]
 
     def __repr__(self):
-        headers = (
-                (("name",) if len(self.headers) < len(self.value[0]) else ()) +
-                self.headers)
+        headers = ((
+            ("name",) if len(self.headers) < len(self.value[0]) and \
+                    isinstance(self.value[0][0], str) else ()) + self.headers)
+        headers = headers + ("",) * max(0, len(self.value[0]) - len(headers))
         return tabulate(self.value, headers=headers)
