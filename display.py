@@ -1,3 +1,4 @@
+from tabulate import tabulate, SEPARATING_LINE
 import matplotlib.pyplot as plt
 
 import sys, pathlib
@@ -143,16 +144,36 @@ class Example:
 
         return fig
 
-    def readable(self):
+    def debug(self):
         this = self.opt().surface
+        res = []
         for i in jnp.nonzero(this.edge.valid)[0]:
-            print(
-                    f"[{i:2d}] "
-                    f"({this.edge.center_1st[i]:7.1f}, "
-                    f"{this.edge.center_0th[i]:7.1f}) "
-                    f"r: {this.edge.radius[i]:7.2f} "
-                    f"n: {this.edge.samples[i]:2d} "
-                    f"edge: {this.edge.rmse[i]:7.3f} "
-                    f"surface: {this.rmse[i]:7.3f} ")
-        print("----")
+            res.append([j.item() for j in [
+                    i,
+                    this.edge.center_1st[i],
+                    this.edge.center_0th[i],
+                    this.edge.radius[i],
+                    this.edge.samples[i],
+                    this.edge.rmse[i],
+                    this.rmse[i]]])
+        if self.name is not None:
+            res[0] = [self.name] + res[0]
+            for i in range(1, len(res)):
+                res[i] = [""] + res[i]
+        return res
 
+class Readable:
+    headers = ("i", "x", "y", "r", "n", "edge", "surface")
+
+    def __init__(self, it):
+        self.value = []
+        for i in it:
+            self.value += i
+            self.value.append(SEPARATING_LINE)
+        self.value = self.value[:-1]
+
+    def __repr__(self):
+        headers = (
+                (("name",) if len(self.headers) < len(self.value[0]) else ()) +
+                self.headers)
+        return tabulate(self.value, headers=headers)
