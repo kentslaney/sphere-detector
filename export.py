@@ -10,6 +10,7 @@ target = Config.resolution
 import jax
 import jax.numpy as jnp
 
+# TODO: update interface
 @jax.jit
 def jax_density(x):
     x = x.reshape(target)

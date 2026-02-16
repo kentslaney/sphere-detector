@@ -249,14 +249,10 @@ class Raster:
                 self.depth, pred, self.config.rays,
                 self.diag // self.config.extent)
 
-    @jax_limit_cache('candidates')
-    def refit(self, candidates=candidates_default):
-        return self.opt(candidates).fit
-
     def draw_refit(self, fig=None, candidates=candidates_default, label=True):
         fig, ax = self.cropped_background(fig)
         import matplotlib.patches as patches
-        stats = self.refit(candidates)
+        stats = self.opt(candidates).fit
         color = 'r'
         kw = { 'linewidth': 1, 'edgecolor': color, 'facecolor': 'none' }
         if label is not None:
@@ -973,7 +969,7 @@ class AliasedRay:
 
     @cached_property
     def surface(self):
-        # TODO: only fit the first 80% (?)
+        # TODO: only fit the first 80% and decrease penalty for consistently off
         lim, ax_oxx = self.samples[..., None], (slice(None), None, None)
         x, r = jnp.arange(self.distance)[None, None], self.fit.radius[ax_oxx]
         y = jnp.concat(self.adjacent, axis=1) * self.w[ax_oxx]
@@ -1054,14 +1050,17 @@ class Circles(namedtuple("Circles", (
     def valid(self):
         return self.samples > 3  # avoid vacantly 0 RMSE
 
+class Surface(namedtuple("Surface", ("config", "edge", "center_2nd", "rmse"))):
+    # TODO: confidences, possibly exp(-RMSE)
     def readable(self):
-        for i in jnp.nonzero(self.valid)[0]:
+        for i in jnp.nonzero(self.edge.valid)[0]:
             print(
                     f"[{i:2d}] "
-                    f"({self.center_1st[i]:7.1f}, {self.center_0th[i]:7.1f}) "
-                    f"radius: {self.radius[i]:7.2f} n: {self.samples[i]:2d}")
+                    f"({self.edge.center_1st[i]:7.1f}, "
+                    f"{self.edge.center_0th[i]:7.1f}) "
+                    f"r: {self.edge.radius[i]:7.2f} "
+                    f"n: {self.edge.samples[i]:2d} "
+                    f"edge: {self.edge.rmse[i]:7.3f} "
+                    f"surface: {self.rmse[i]:7.3f} ")
         print("----")
 
-class Surface(namedtuple("Surface", ("config", "edge", "center_2nd", "rmse"))):
-    # TODO: confidences
-    pass

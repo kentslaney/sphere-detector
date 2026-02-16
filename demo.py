@@ -48,6 +48,7 @@ class Demo(Demo):
         origin = (scaled - self.shape) // 2
         return jnp.tile(origin, [1, 2]) + jnp.int32(coords / unscale)
 
+# TODO: update interface
 def demo_model(arr):
     im = Demo(arr)
     _, bboxes = im.depth.binned().nominate()
