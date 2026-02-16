@@ -119,14 +119,14 @@ class Config:
     subdivisions: any = 8  # minimum number of cells per dimension
     candidates: any = 16  # number of curves to trace
     rays: any = 64  # number of 2d points to fit
-    extent: any = 4  # minimum number of radii per diagonal
+    extent: any = 8  # minimum number of radii per diagonal
 
     # Bounds
     eps: any = 0.1  # density stabilization coefficient
 
     # AliasedRay
     alpha: any = 0.0  # standard deviations above mean for ray start depth
-    # mean height vs center: 2 / 3 * R and standard deviation: sqrt(2) / 6 * R
+    # mean height vs center: 2 / 3 * r and standard deviation: sqrt(2) / 6 * r
     beta: any = 3.0  # standard deviations below mean for ray start depth
     gamma: any = 0.2  # interpolation value between median and mean for w
     delta: any = 0.5  # threshold in standard deviations for ray depth jump
@@ -267,8 +267,7 @@ class Raster:
                 jnp.stack((stats.center_0th, stats.center_1st, stats.radius)),
                 axis=1)
         for y, x, r in it:
-            overlay = patches.Circle((x, y), r, **kw)
-            ax.add_patch(overlay)
+            ax.add_patch(patches.Circle((x, y), r, **kw))
         if label is not None:
             ax.autoscale(False)
             for i, (y, x, r) in enumerate(it):
@@ -974,10 +973,20 @@ class AliasedRay:
 
     def debug(self, index=0):
         import matplotlib.pyplot as plt
-        depths = jnp.concat(self.adjacent, axis=1) * self.w[:, None, None]
-        lengths = jnp.concat(self.samples, axis=1)
-        for i in range(lengths.shape[1]):
-            plt.plot(depths[index][i][:lengths[index][i]])
+        y = jnp.concat(self.adjacent, axis=1) * self.w[:, None, None]
+        lim = jnp.concat(self.samples, axis=1)
+        x = jnp.arange(self.distance)
+        # TODO: axes, mask x >= lim
+        # y_c = jnp.mean(y - jnp.sqrt(r ** 2 - jax.lax.minimum(x, r) ** 2))
+        # err = jnp.sqrt(jnp.mean((jnp.sqrt(x ** 2 + (y - y_c) ** 2) - r) ** 2))
+        for i in range(lim.shape[1]):
+            plt.plot(y[index][i][:lim[index][i]], color='b')
+
+        plt.axvline(x=self.fit.radius[index], color='g')
+        import matplotlib.patches as patches
+        kw = { 'linewidth': 1, 'edgecolor': 'r', 'facecolor': 'none' }
+        # plt.add_patch(patches.Circle((0, y_c), r, **kw))
+
         plt.show()
 
 class Trace(namedtuple("Trace", ("points", "valid"))):
