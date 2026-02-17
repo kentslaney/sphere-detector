@@ -40,19 +40,9 @@ class Config:
     delta: any = 0.5  # threshold in standard deviations for ray depth jump
     chi: any = 0.5  # standard deviations above initial mean radius to look
 
-@jax.tree_util.register_pytree_node_class
 class Raster:
     config = Config()
     model = Da2('vits')
-
-    def tree_flatten(self):
-        return (jnp.array(self.full), self.cache, self.config), None
-
-    @classmethod
-    def tree_unflatten(cls, aux_data, children):
-        import numpy as np
-        im, depths, config = children
-        return cls(Image.fromarray(np.array(im)), depths, **config)
 
     def data(self, *a, **kw):
         return Depth(self.config, *a, **kw)
@@ -220,6 +210,7 @@ class Depth:
     def masked(self):
         return jnp.where(self.inwards[..., None], self.centers, -1)
 
+    @jax.jit
     def binned(self):
         centers = self.masked.reshape(-1, 2)
         indices = Casts2d.create(self.depth.shape, self.masked)
@@ -332,6 +323,7 @@ class Bounds:
                 self.config, self.shape, self.scale, self.bounds[key],
                 self.counts[key], origin, offset, self.counts.shape)
 
+    @jax.jit
     def sifted(self):
         hi, val = None, None
         for i in self.off:
@@ -813,6 +805,12 @@ class AliasedRay:
             valid, (jnp.sqrt(x ** 2 + (y - y_c[ax_oxx]) ** 2) - r) ** 2,
             0), (1, 2)) / jnp.sum(lim, (1, 2)))
         return Surface(self.config, self.fit, y_c / self.w, rmse)
+
+    @jax.jit
+    def predict(self):
+        confidences = self.surface.confidences
+        order = jnp.argsort(confidences, descending=True, stable=False)
+        return confidences[order], self.surface.bounds[order]
 
 class Trace(namedtuple("Trace", ("points", "valid"))):
     @jax.jit

@@ -16,9 +16,6 @@ python -m src.depth-test.export
 
 ## TODOs
 - Figure out a better repo name
-- Sort bounding boxes
-- move PIL out of detect
-- make the demo worker static graph
 ```bash
 grep TODO -r src | cat -n
 ```

@@ -44,10 +44,10 @@ class Demo(Raster):
 
     @property
     def bounds(self):
-        return Bounds(self.opt().surface.bounds, self.uncrop)
+        return Predictions(*self.opt().predict(), self.uncrop)
 
-class Bounds:
-    def __init__(self, cropped, fn):
+class Predictions:
+    def __init__(self, confidences, cropped, fn):
         self.cropped = jnp.int32(cropped)
         self.fn = fn
 
