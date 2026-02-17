@@ -47,7 +47,7 @@ class Demo(Raster):
         return Predictions(*self.opt().predict(), self.uncrop)
 
 class Predictions:
-    def __init__(self, confidences, cropped, fn):
+    def __init__(self, confidence, cropped, fn):
         self.cropped = jnp.int32(cropped)
         self.fn = fn
 

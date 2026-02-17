@@ -110,12 +110,12 @@ class Raster:
     def seives(self):
         return Seives.create(self.depth.binned())
 
-    @lazy_default(candidates=lambda this, *a, **kw: this.config.candidates)
+    @lazy_default(candidates=lambda self, *a, **kw: self.config.candidates)
     @jax_limit_cache('candidates')
     def stat(self, candidates):
         return self.seives.stat(candidates)
 
-    @lazy_default(candidates=lambda this, *a, **kw: this.config.candidates)
+    @lazy_default(candidates=lambda self, *a, **kw: self.config.candidates)
     @jax_limit_cache('candidates', '.depth', '.theta')
     def opt(self, candidates):
         pred = self.stat(candidates)
@@ -583,10 +583,10 @@ class Seives:
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["confidences", "stats"], meta_fields=[])
+        data_fields=["confidence", "stats"], meta_fields=[])
 @dataclass
 class FlatStat:
-    confidences: any
+    confidence: any
     stats: any
 
     order = Bins.stats
@@ -831,9 +831,9 @@ class AliasedRay:
 
     @jax.jit
     def predict(self):
-        confidences = self.surface.confidences
-        order = jnp.argsort(confidences, descending=True, stable=False)
-        return confidences[order], self.surface.bounds[order]
+        confidence = self.surface.confidence
+        order = jnp.argsort(confidence, descending=True, stable=False)
+        return confidence[order], self.surface.bounds[order]
 
 class Trace(namedtuple("Trace", ("points", "valid"))):
     @jax.jit
@@ -882,5 +882,12 @@ class Surface(namedtuple("Surface", (
         return self.edge.bounds
 
     @property
-    def confidences(self):
-        return jnp.exp(-self.rmse)
+    def loss(self):
+        # guessing based on sample size and edge detection frequency
+        return jnp.where(
+                self.edge.valid, jnp.sqrt(self.config.rays) / self.edge.samples,
+                self.config.rays)
+
+    @property
+    def confidence(self):
+        return jnp.exp(-(self.rmse + self.edge.rmse + self.loss))

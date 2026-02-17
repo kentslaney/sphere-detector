@@ -13,21 +13,19 @@ def poplt(x=None, init=None):
         init(ax)
     return fig, ax
 
-class Example:
-    obj = Raster
-    name = None
-
-    def __init__(self, wrapping):
-        self.obj = wrapping
-
-    @classmethod
-    def file(cls, path, npy=None, name=None, **kw):
-        obj = cls(cls.obj.file(path, npy, **kw))
-        obj.name = pathlib.Path(path).name if name is None else name
-        return obj
+class Wrapper:
+    def __init__(self, wrapping, name=None):
+        self.obj, self.name = wrapping, name
 
     def __getattr__(self, name):
         return getattr(self.obj, name)
+
+class Example(Wrapper):
+    @classmethod
+    def file(cls, path, npy=None, name=None, **kw):
+        obj = cls(Raster.file(path, npy, **kw))
+        obj.name = pathlib.Path(path).name if name is None else name
+        return obj
 
     def cropped_background(self, fig=None):
         return poplt(fig, lambda ax: ax.imshow(self.cropped()))
@@ -105,33 +103,37 @@ class Example:
         ax1.axvline(opt.radius_mean[0] + self.config.chi * opt.radius_std[0])
         return fig
 
+    def opt(self, *a, **kw):
+        obj = Sampled(self.obj.opt(*a, **kw), self.name)
+        return obj
+
+class Sampled(Wrapper):
     def plot_depths(self, index=0, ax=None):
-        this = self.opt()
-        y = jnp.concat(this.adjacent, axis=1) * this.w[:, None, None]
-        y += this.surface.skew
-        y_c, rmse = this.surface.center_2nd * this.w, this.surface.rmse
+        y = jnp.concat(self.adjacent, axis=1) * self.w[:, None, None]
+        y += self.surface.skew
+        y_c, rmse = self.surface.center_2nd * self.w, self.surface.rmse
 
         if ax is None:
             fig = plt.figure()
             ax = fig.subplots()
 
-        cmap, taus = plt.get_cmap('twilight'), this.surface.revolutions
-        for i in range(0, this.samples.shape[1], 1):
-            ax.plot(y[index][i][:this.samples[index][i]], color=cmap(taus[i]))
+        cmap, taus = plt.get_cmap('twilight'), self.surface.revolutions
+        for i in range(0, self.samples.shape[1], 1):
+            ax.plot(y[index][i][:self.samples[index][i]], color=cmap(taus[i]))
 
-        ax.axvline(x=this.fit.radius[index], color='g')
+        ax.axvline(x=self.fit.radius[index], color='g')
         import matplotlib.patches as patches
         kw = {
                 'linewidth': 2, 'edgecolor': 'r', 'facecolor': 'none',
                 'zorder': 5 }
         ax.add_patch(patches.Circle(
-            (this.surface.x_c, y_c[index]), this.fit.radius[index], **kw))
+            (self.surface.x_c, y_c[index]), self.fit.radius[index], **kw))
 
         name = " " if self.name is None else f" {self.name} "
         msg = (
             f'Surface RMSE: {rmse[index]:.2f}\n'
-            f'Edge RMSE: {this.fit.rmse[index]:0.2f}\n'
-            f'n: {this.fit.samples[index]} / {this.surface.config.rays}'
+            f'Edge RMSE: {self.fit.rmse[index]:0.2f}\n'
+            f'n: {self.fit.samples[index]} / {self.surface.config.rays}'
         )
         ax.text(
                 0.05, 0.05, msg,
@@ -147,25 +149,29 @@ class Example:
             return fig
 
     def tsv(self, residuals, index=0):
-        this = self.opt()
-        yx = jnp.concat(this.steps, axis=2)
-        center = jnp.mean(yx, (2, 3), where=this.valid, keepdims=True)
+        yx = jnp.concat(self.steps, axis=2)
+        center = jnp.mean(yx, (2, 3), where=self.valid, keepdims=True)
         data = jnp.concat((yx - center, residuals[None]))
-        unsized = data[:, index][:, this.valid[index]].T
+        unsized = data[:, index][:, self.valid[index]].T
         return "\n".join(["\t".join(str(j.item()) for j in i) for i in unsized])
 
+    @property
+    def surface(self):
+        return Candidate(self.obj.surface, self.name)
+
+class Candidate(Wrapper):
     def debug(self):
-        this = self.opt().surface
         res = []
-        for i in jnp.nonzero(this.edge.valid)[0]:
+        for i in jnp.nonzero(self.edge.valid)[0]:
             res.append([j.item() if hasattr(j, "item") else j for j in [
                 i,
-                this.edge.center_1st[i],
-                this.edge.center_0th[i],
-                this.edge.radius[i],
-                this.edge.samples[i],
-                this.edge.rmse[i],
-                this.rmse[i],
+                self.edge.center_1st[i],
+                self.edge.center_0th[i],
+                self.edge.radius[i],
+                self.edge.samples[i],
+                self.edge.rmse[i],
+                self.rmse[i],
+                self.confidence[i],
             ]])
         if self.name is not None:
             res[0] = [self.name] + res[0]
