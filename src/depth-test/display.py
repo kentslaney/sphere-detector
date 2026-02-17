@@ -108,6 +108,7 @@ class Example:
     def plot_depths(self, index=0, ax=None):
         this = self.opt()
         y = jnp.concat(this.adjacent, axis=1) * this.w[:, None, None]
+        y += this.surface.skew
         y_c, rmse = this.surface.center_2nd * this.w, this.surface.rmse
 
         if ax is None:
@@ -144,6 +145,14 @@ class Example:
 
         if ax is None:
             return fig
+
+    def tsv(self, residuals, index=0):
+        this = self.opt()
+        yx = jnp.concat(this.steps, axis=2)
+        center = jnp.mean(yx, (2, 3), where=this.valid, keepdims=True)
+        data = jnp.concat((yx - center, residuals[None]))
+        unsized = data[:, index][:, this.valid[index]].T
+        return "\n".join(["\t".join(str(j.item()) for j in i) for i in unsized])
 
     def debug(self):
         this = self.opt().surface

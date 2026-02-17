@@ -660,7 +660,6 @@ class BinSum:
         shifted = jax.lax.dynamic_slice(self.sum, offset, shape)
         return BinSum(jax.lax.reduce_window(shifted, 0., jax.lax.add, *bin_win))
 
-# TODO: adjust according to confidences?
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=[
@@ -794,25 +793,41 @@ class AliasedRay:
         return jnp.concat(res, axis=1)
 
     @cached_property
-    def surface(self):
-        x = jnp.arange(self.distance)[None, None]
-        valid = x < self.samples[..., None]
-        r = self.fit.radius[:, None, None]
-        y = jnp.concat(self.adjacent, axis=1) * self.w[:, None, None]
-        x, r = x - Surface.x_c, r - Surface.x_c
-        y_c = jnp.mean(
-            y - jnp.sqrt(r ** 2 - jnp.minimum(x, r) ** 2), (1, 2), where=valid)
-        residuals = y - y_c[:, None, None]
-        residuals = jnp.sqrt(x ** 2 + residuals ** 2) - r
-        rmse = jnp.sqrt(jnp.mean(residuals ** 2, (1, 2), where=valid))
-        return Surface(self.config, self.fit, y_c / self.w, rmse)
+    def valid(self):
+        return jnp.arange(self.distance)[None, None] < self.samples[..., None]
 
-    def skew(self, residuals, valid):
-        # TODO: center mean and masked covariance for OLS
-        # (C_yy * C_xz - C_xy * C_yz) / Det(Cov(X, Y))
-        # (C_xx * C_yz - C_xy * C_xz) / Det(Cov(X, Y))
-        # jnp.concat((jnp.concat(self.steps, axis=2), residuals[None]))
-        return residuals
+    @cached_property
+    def surface(self):
+        x = jnp.arange(self.distance)[None, None] - Surface.x_c
+        r = self.fit.radius[:, None, None] - Surface.x_c
+        y_hat = jnp.sqrt(r ** 2 - jnp.minimum(x, r) ** 2)
+        y_hat = jnp.mean(
+                jnp.tile(y_hat, [1, 2 * self.config.rays, 1]),
+                (1, 2), where=self.valid)
+
+        y = jnp.concat(self.adjacent, axis=1) * self.w[:, None, None]
+        y_c = jnp.mean(y, (1, 2), where=self.valid) - y_hat
+
+        residuals = jnp.sqrt(x ** 2 + (y - y_c[:, None, None]) ** 2) - r
+        bias = self.skew(residuals)
+        residuals = jnp.sqrt(x ** 2 + (y + bias - y_c[:, None, None]) ** 2) - r
+        rmse = jnp.sqrt(jnp.mean(residuals ** 2, (1, 2), where=self.valid))
+        return Surface(self.config, self.fit, y_c / self.w, rmse, bias)
+
+    def skew(self, residuals):
+        yx = jnp.concat(self.steps, axis=2)
+        data = jnp.concat((yx, residuals[None]))
+        center = jnp.mean(data, (2, 3), where=self.valid, keepdims=True)
+        centered = jnp.where(self.valid, data - center, 0)
+        data = centered.reshape(
+                (3, self.candidates, 2 * self.config.rays * self.distance))
+        data = jnp.transpose(data, (1, 0, 2))
+        data_t = jnp.transpose(data, (0, 2, 1))
+        cov = data @ data_t / jnp.sum(self.samples, 1)[:, None, None]
+        z = jnp.linalg.det(cov[:, :2, :2])
+        y = jnp.linalg.det(cov[:, :2, 1:]) / z
+        x = jnp.linalg.det(jnp.stack((cov[:, :2, 0], cov[:, :2, 2]), 2)) / z
+        return jnp.sum(centered[:2] * jnp.vstack((y, x))[..., None, None], 0)
 
     @jax.jit
     def predict(self):
@@ -855,7 +870,7 @@ class Circles(namedtuple("Circles", (
         return self.samples > 3  # avoid vacantly 0 RMSE
 
 class Surface(namedtuple("Surface", (
-        "config", "edge", "center_2nd", "rmse"))):
+        "config", "edge", "center_2nd", "rmse", "skew"))):
     x_c = -(math.sqrt(2) + math.log(1 + math.sqrt(2))) / 4
 
     @property

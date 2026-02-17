@@ -7,12 +7,10 @@ target = Config.resolution
 import jax
 import jax.numpy as jnp
 
-# TODO: update interface
 @jax.jit
 def jax_density(x):
     x = x.reshape(target)
-    predictions = Raster(jnp.array([]), x).opt().surface
-    confidence, coordinates = predictions.confidences, predictions.bounds
+    confidence, coordinates = Raster(jnp.array([]), x).opt().surface.predict()
     confidence = jnp.astype(confidence, jnp.float16)
     coordinates /= jnp.tile(jnp.array(target), [1, 2])
     coordinates = jnp.hstack((
