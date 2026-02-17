@@ -102,7 +102,7 @@ def rect(im, *bboxes, color=(0, 255, 0), thickness=1, **kw):
 cap = None
 worker = PyTorchWorker(demo_model)
 
-def main(count_bboxes=3, live_bboxes=3):
+def main(count_bboxes=0, live_bboxes=5):
     global cap, worker
     if cap is not None:
         clean()
