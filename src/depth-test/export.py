@@ -1,9 +1,6 @@
 # TODO: float16 internals
-import pathlib, sys
-local = pathlib.Path(__file__).parents[0]
-sys.path.insert(0, str(local))
-from detect import Config, Raster
-sys.path.pop(0)
+from .detect import Config, Raster
+from .utils import local
 
 target = Config.resolution
 
@@ -14,7 +11,7 @@ import jax.numpy as jnp
 @jax.jit
 def jax_density(x):
     x = x.reshape(target)
-    predictions = Raster(jnp.array([]), x).refit()
+    predictions = Raster(jnp.array([]), x).opt().surface
     confidence, coordinates = predictions.confidences, predictions.bounds
     confidence = jnp.astype(confidence, jnp.float16)
     coordinates /= jnp.tile(jnp.array(target), [1, 2])

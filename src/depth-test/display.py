@@ -1,12 +1,8 @@
-from tabulate import tabulate, SEPARATING_LINE
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
+from tabulate import tabulate, SEPARATING_LINE
 
-import sys, pathlib
-local = pathlib.Path(__file__).parents[0]
-
-sys.path.insert(0, str(local))
-from detect import *
-sys.path.pop(0)
+from .detect import Raster
 
 def poplt(x=None, init=None):
     if x is not None:
@@ -45,7 +41,8 @@ class Example:
             rect = patches.Rectangle(x[1::-1], *(x[:1:-1] - x[1::-1]), **kw)
             ax.add_patch(rect)
             ax.annotate(
-                    str(i), x[1::-1], xytext=(1, -1), textcoords="offset points",
+                    str(i), x[1::-1], xytext=(1, -1),
+                    textcoords="offset points",
                     va='top', ha='left', color=color)
         return fig
 

@@ -1,9 +1,6 @@
 [submodule "assets/depth_anything_v2"]
 	path = assets/depth_anything_v2
 	url = https://github.com/DepthAnything/Depth-Anything-V2
-[submodule "assets/coreml_depth_anything_v2_small"]
-	path = assets/coreml_depth_anything_v2_small
-	url = https://huggingface.co/apple/coreml-depth-anything-v2-small
 [submodule "assets/stablehlo_coreml"]
 	path = assets/stablehlo_coreml
 	url = git@github.com:kentslaney/stablehlo-coreml.git

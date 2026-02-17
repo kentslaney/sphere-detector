@@ -1,16 +1,10 @@
-import cv2
-import torch
-import threading
-import collections
-import time
+import cv2, torch, threading, collections, time
 import numpy as np
+import jax.numpy as jnp
 from PIL import Image
 
-import sys, pathlib
-local = pathlib.Path(__file__).parents[0]
-sys.path.insert(0, str(local))
-from detect import *
-sys.path.pop(0)
+from .utils import local
+from .detect import Raster
 
 class BlockingDeque:
     def __init__(self, maxlen):
@@ -38,21 +32,31 @@ class BlockingDeque:
 input_queue = BlockingDeque(maxlen=1)
 output_queue = BlockingDeque(maxlen=1)
 
-class Demo(Demo):
+class Demo(Raster):
     def uncrop(self, coords):
-        if self.target is None:
+        if self.config.resolution is None:
             return coords
         size = jnp.array(self.full.size[::-1])
-        unscale = jnp.max(self.shape / size)
-        scaled = jnp.int32(unscale * size)
-        origin = (scaled - self.shape) // 2
-        return jnp.tile(origin, [1, 2]) + jnp.int32(coords / unscale)
+        unscale = jnp.min(size / self.shape)
+        scaled = jnp.int32(unscale * self.shape)
+        origin = (size - scaled) // 2
+        return jnp.tile(origin, [1, 2]) + jnp.int32(coords * unscale)
 
-# TODO: update interface
+    @property
+    def bounds(self):
+        return Bounds(self.opt().surface.bounds, self.uncrop)
+
+class Bounds:
+    def __init__(self, cropped, fn):
+        self.cropped = jnp.int32(cropped)
+        self.fn = fn
+
+    @property
+    def uncropped(self):
+        return self.fn(self.cropped)
+
 def demo_model(arr):
-    im = Demo(arr)
-    _, bboxes = im.depth.binned().nominate()
-    return im.uncrop(bboxes)
+    return Demo(arr).bounds.uncropped
 
 class PyTorchWorker(threading.Thread):
     def __init__(self, model):
@@ -83,6 +87,8 @@ def pollnt(*titles):
 
 def rect(im, *bboxes, color=(0, 255, 0), thickness=1, **kw):
     for bbox in bboxes:
+        if any(map(jnp.isnan, bbox)):
+            continue
         bbox = bbox.tolist() if hasattr(bbox, 'dtype') else bbox
         cv2.rectangle(im, bbox[1::-1], bbox[3:1:-1], color, thickness, **kw)
 
@@ -95,12 +101,15 @@ def main(count_bboxes=3, live_bboxes=3):
         clean()
     cap = cv2.VideoCapture(0)
 
+    warmup = Demo.file(local / "assets" / "examples" / "IMG_0004.HEIC")
+    print("n =", warmup.bounds.uncropped.shape[0])
+
     queue = []
     def window(*titles):
         cv2.namedWindow("preview")
         queue.append(titles)
     window("preview")
-    preview_bboxes = False
+    preview_bboxes, bboxes = False, None
 
     worker.start()
 
@@ -120,7 +129,7 @@ def main(count_bboxes=3, live_bboxes=3):
             im = Demo(Image.fromarray(frame_rgb))
             smol = cv2.cvtColor(np.array(im.cropped()), cv2.COLOR_RGB2BGR)
 
-            _, bboxes = im.depth.binned().nominate(16)
+            bboxes = im.bounds.cropped
             for bbox in bboxes.tolist():
                 rect(smol, bbox)
 
@@ -145,10 +154,11 @@ def main(count_bboxes=3, live_bboxes=3):
         try:
             bboxes = output_queue.pop_nowait()
             pending, frame = frame, frame.copy()
-            rect(frame, *bboxes[:live_bboxes])
         except IndexError:
             pending = frame
         if preview_bboxes:
+            if bboxes is not None:
+                rect(frame, *bboxes[:live_bboxes])
             input_queue.append(pending)
 
         it = enumerate(queue)

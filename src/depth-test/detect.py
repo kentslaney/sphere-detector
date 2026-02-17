@@ -1,113 +1,19 @@
 import sys, pathlib, math, inspect
-from functools import cached_property, partial, wraps
+from functools import cached_property, partial
 from dataclasses import dataclass
-from collections import namedtuple, OrderedDict
+from collections import namedtuple
 
 import jax
 import jax.numpy as jnp
 from jax.scipy.signal import correlate2d
 from jax.scipy.optimize import minimize
 
+from .utils import lazy_default, jax_limit_cache
+from .depth import Da2
+
 from PIL import Image
 from pillow_heif import register_heif_opener
 register_heif_opener()
-
-local = pathlib.Path(__file__).parents[0]
-
-# TODO: switch to Depth Anything 3 (after RealityKit and before Godot)
-class Da2:
-    model_configs = {
-        'vits': {'features': 64, 'out_channels': [48, 96, 192, 384]},
-        'vitb': {'features': 128, 'out_channels': [96, 192, 384, 768]},
-        'vitl': {'features': 256, 'out_channels': [256, 512, 1024, 1024]},
-        'vitg': {'features': 384, 'out_channels': [1536, 1536, 1536, 1536]},
-    }
-    size_mapping = { 'vits': 'Small', 'vitb': 'Base', 'vitl': 'Large' }
-
-    def __init__(self, encoder):
-        self.encoder = encoder
-
-    @property
-    def model_config(self):
-        return { "encoder": self.encoder, **self.model_configs[self.encoder] }
-
-    @property
-    def model_repo(self):
-        size = self.size_mapping[self.encoder]
-        return f'https://huggingface.co/depth-anything/Depth-Anything-V2-{size}'
-
-    @property
-    def model_path(self):
-        return f'main/depth_anything_v2_{self.encoder}.pth'
-
-    @property
-    def model_url(self):
-        return f'{self.model_repo}/resolve/{self.model_path}?download=true'
-
-    @cached_property
-    def model(self):
-        import torch
-        sys.path.insert(0, str(local / "assets" / "depth_anything_v2"))
-        from depth_anything_v2.dpt import DepthAnythingV2
-        sys.path.pop(0)
-
-        DEVICE = 'cuda' if torch.cuda.is_available() else \
-                'mps' if torch.backends.mps.is_available() else 'cpu'
-
-        model = DepthAnythingV2(**self.model_config)
-        model.load_state_dict(torch.hub.load_state_dict_from_url(
-                self.model_url, map_location='cpu'))
-        return model.to(DEVICE).eval()
-
-    def __call__(self, im):
-        import numpy as np
-        return jnp.array(self.model.infer_image(np.array(im)))
-
-def jax_limit_cache(arg, *excluded, axis=0, maxsize=None):
-    cache = OrderedDict()
-    def decorator(f):
-        sig = inspect.signature(f)
-        @wraps(f)
-        def wrapper(*a, **kw):
-            bound = sig.bind(*a, **kw)
-            bound.apply_defaults()
-            limit = bound.arguments[arg]
-            key = frozenset(
-                    (k, v) for k, v in bound.arguments.items() if k != arg)
-            res = None
-            if key in cache:
-                cache.move_to_end(key)
-                size, res = cache[key]
-                if size < limit:
-                    res = None
-                elif size == limit:
-                    return res
-            if res is None:
-                res = f(*a, **kw)
-                cache[key] = (limit, res)
-                if maxsize is not None and len(cache) > maxsize:
-                    cache.popitem(last=False)
-                return res
-            def mapping(path, x):
-                if jax.tree_util.keystr(path) in excluded:
-                    return x
-                assert x.shape[axis] == size
-                return jax.lax.slice_in_dim(x, 0, limit, axis=axis)
-            return jax.tree.map_with_path(mapping, res)
-        return wrapper
-    return decorator
-
-def lazy_default(**lazy):
-    def decorator(f):
-        sig = inspect.signature(f)
-        @wraps(f)
-        def wrapper(*a, **kw):
-            bound = sig.bind_partial(*a, **kw)
-            return f(*a, **kw, **{
-                k: v(*a, **kw) for k, v in lazy.items()
-                if k not in bound.arguments})
-        return wrapper
-    return decorator
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -950,3 +856,11 @@ class Surface(namedtuple("Surface", (
     @property
     def revolutions(self):
         return jnp.concat((jnp.linspace(0, 1, self.config.rays, False),) * 2)
+
+    @property
+    def bounds(self):
+        return self.edge.bounds
+
+    @property
+    def confidences(self):
+        return jnp.exp(-self.rmse)
