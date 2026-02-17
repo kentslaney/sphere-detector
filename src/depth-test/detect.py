@@ -17,7 +17,7 @@ register_heif_opener()
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["alpha", "beta", "gamma", "delta", "eps", "chi"],
+        data_fields=["alpha", "beta", "gamma", "delta", "eps", "chi", "phi"],
         meta_fields=[
             "resolution", "candidates", "rays", "extent", "subdivisions"])
 @dataclass(kw_only=True)
@@ -31,6 +31,8 @@ class Config:
 
     # Bounds
     eps: any = 0.1  # density stabilization coefficient
+    # patern-matched, not derived
+    phi: any = (1 + math.sqrt(5)) / 2  # metric dimensionality
 
     # AliasedRay
     alpha: any = 0.0  # standard deviations above mean for ray start depth
@@ -306,15 +308,16 @@ class Bounds:
         y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
         return jnp.int32(y) * x
 
-    # TODO: convex mapping for sum to prioritize likely candidates?
     @cached_property
     def metric(self):
-        # counts ~ area
-        # counts ** 1.5 / area / sqrt(scale) ~ sqrt(area / scale)
+        # counts ~ area implies as proportional:
+        #     counts ** phi / area / scale ** (2 * (phi - 1))
+        #     (area / scale ** 2) ** (phi - 1)
         # which is resolution invariant
         areas, total = self.area(), self.counts.size
-        return (self.counts ** 1.5) / (
-                areas + self.config.eps * total * self.scale ** 2) / self.scale
+        stabilization = self.config.eps * total * self.scale ** 2
+        return (self.counts ** self.config.phi) / (areas + stabilization) / \
+                self.scale ** (2 * (self.config.phi - 1))
 
     def __getitem__(self, key):
         offset = jnp.array([i.start for i in key])
@@ -812,6 +815,7 @@ class AliasedRay:
         bias = self.skew(residuals)
         residuals = jnp.sqrt(x ** 2 + (y + bias - y_c[:, None, None]) ** 2) - r
         rmse = jnp.sqrt(jnp.mean(residuals ** 2, (1, 2), where=self.valid))
+        rmse = jnp.where(jnp.isnan(rmse), jnp.inf, rmse)
         return Surface(self.config, self.fit, y_c / self.w, rmse, bias)
 
     def skew(self, residuals):
@@ -831,9 +835,8 @@ class AliasedRay:
 
     @jax.jit
     def predict(self):
-        confidence = self.surface.confidence
-        order = jnp.argsort(confidence, descending=True, stable=False)
-        return confidence[order], self.surface.bounds[order]
+        surface = self.surface
+        return surface.confidence[surface.order], surface.bounds[surface.order]
 
 class Trace(namedtuple("Trace", ("points", "valid"))):
     @jax.jit
@@ -883,11 +886,15 @@ class Surface(namedtuple("Surface", (
 
     @property
     def loss(self):
-        # guessing based on sample size and edge detection frequency
+        # patern-matched, not derived
         return jnp.where(
                 self.edge.valid, jnp.sqrt(self.config.rays) / self.edge.samples,
                 self.config.rays)
 
-    @property
+    @cached_property
+    def order(self):
+        return jnp.argsort(self.confidence, descending=True, stable=False)
+
+    @cached_property
     def confidence(self):
         return jnp.exp(-(self.rmse + self.edge.rmse + self.loss))

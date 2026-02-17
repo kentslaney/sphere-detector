@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from tabulate import tabulate, SEPARATING_LINE
@@ -162,7 +163,7 @@ class Sampled(Wrapper):
 class Candidate(Wrapper):
     def debug(self):
         res = []
-        for i in jnp.nonzero(self.edge.valid)[0]:
+        for i in self.order[self.edge.valid[self.order]]:
             res.append([j.item() if hasattr(j, "item") else j for j in [
                 i,
                 self.edge.center_1st[i],
