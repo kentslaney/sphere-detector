@@ -1,4 +1,4 @@
-import cv2, torch, threading, collections, time
+import cv2, torch, threading, collections, time, sys
 import numpy as np
 import jax.numpy as jnp
 from PIL import Image
@@ -47,8 +47,10 @@ class Demo(Raster):
         return Predictions(*self.opt().predict(), self.uncrop)
 
 class Predictions:
+    shown = 5
+
     def __init__(self, confidence, cropped, fn):
-        print(confidence)
+        self.confidence = confidence
         self.cropped = jnp.int32(cropped)
         self.fn = fn
 
@@ -56,8 +58,12 @@ class Predictions:
     def uncropped(self):
         return self.fn(self.cropped)
 
+    def __repr__(self):
+        visible = self.confidence[:self.shown].tolist()
+        return ", ".join(f"{x:.2e}" for x in visible)
+
 def demo_model(arr):
-    return Demo(arr).bounds.uncropped
+    return Demo(arr).bounds
 
 class PyTorchWorker(threading.Thread):
     def __init__(self, model):
@@ -153,7 +159,9 @@ def main(count_bboxes=3, live_bboxes=3):
             preview_bboxes = not preview_bboxes
 
         try:
-            bboxes = output_queue.pop_nowait()
+            status = output_queue.pop_nowait()
+            print(status, end="\r")
+            bboxes = status.uncropped
             pending, frame = frame, frame.copy()
         except IndexError:
             pending = frame
@@ -179,6 +187,7 @@ def main(count_bboxes=3, live_bboxes=3):
 
         cv2.imshow('preview', frame)
 
+    print()
     clean()
 
 def clean():
