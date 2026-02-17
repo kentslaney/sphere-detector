@@ -19,7 +19,8 @@ register_heif_opener()
         jax.tree_util.register_dataclass,
         data_fields=["alpha", "beta", "gamma", "delta", "eps", "chi", "phi"],
         meta_fields=[
-            "resolution", "candidates", "rays", "extent", "subdivisions"])
+            "resolution", "candidates", "rays", "extent", "subdivisions",
+            "early_nms"])
 @dataclass(kw_only=True)
 class Config:
     # Raster
@@ -28,6 +29,7 @@ class Config:
     candidates: any = 16  # number of curves to trace
     rays: any = 64  # number of 2d points to fit
     extent: any = 8  # minimum number of radii per diagonal
+    early_nms: any = True  # Seives.nms bypass switch
 
     # Bounds
     eps: any = 0.1  # density stabilization coefficient
@@ -438,9 +440,10 @@ def kron_bool(a, b):
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["stack"], meta_fields=[])
+        data_fields=["config", "stack"], meta_fields=[])
 @dataclass
 class Seives:
+    config: any
     stack: any
 
     @classmethod
@@ -452,7 +455,7 @@ class Seives:
         out = [base]
         for _ in range(layers):
             out.append(out[-1].sifted())
-        return cls(tuple(out))
+        return cls(base.bounds.config, tuple(out))
 
     def ruler(self, axis): # OEIS A001511
         up = jnp.ones(self.stack[-1].shape[axis] + 4, dtype=jnp.int32)
@@ -488,6 +491,9 @@ class Seives:
 
     @jax.jit(static_argnames=["level"])
     def nms(self, level):
+        if not self.config.early_nms:
+            return True
+
         assert 0 < level < len(self.stack), "layer must store primaries"
         # Only primaries can be candidates, subject to the filter:
         #     Primaries block out 1 level down surroundings
@@ -897,4 +903,5 @@ class Surface(namedtuple("Surface", (
 
     @cached_property
     def confidence(self):
-        return jnp.exp(-(self.rmse + self.edge.rmse + self.loss))
+        res = jnp.exp(-(self.rmse + self.edge.rmse + self.loss))
+        return jnp.where(jnp.isnan(res), 0, res)
