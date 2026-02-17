@@ -123,9 +123,11 @@ class Example:
 
         ax.axvline(x=this.fit.radius[index], color='g')
         import matplotlib.patches as patches
-        kw = { 'linewidth': 2, 'edgecolor': 'r', 'facecolor': 'none' }
+        kw = {
+                'linewidth': 2, 'edgecolor': 'r', 'facecolor': 'none',
+                'zorder': 5 }
         ax.add_patch(patches.Circle(
-            (0, y_c[index]), this.fit.radius[index], zorder=5, **kw))
+            (this.surface.x_c, y_c[index]), this.fit.radius[index], **kw))
 
         name = " " if self.name is None else f" {self.name} "
         msg = (

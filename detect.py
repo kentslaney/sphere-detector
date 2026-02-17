@@ -895,16 +895,16 @@ class AliasedRay:
 
     @cached_property
     def surface(self):
-        # TODO: small angle rotate so the center gradient is flat
-        # TODO: circle center should be -(sqrt(2) + ln(1 + sqrt(2))) / 4
+        # TODO: skew depths via cov((*concat(steps, 1), y)) min eigh
         lim, ax_oxx = self.samples[..., None], (slice(None), None, None)
         x, r = jnp.arange(self.distance)[None, None], self.fit.radius[ax_oxx]
         y = jnp.concat(self.adjacent, axis=1) * self.w[ax_oxx]
+        valid, x, r = x < lim, x - Surface.x_c, r - Surface.x_c
         y_c = jnp.sum(jnp.where(
-            x < lim, y - jnp.sqrt(r ** 2 - jnp.minimum(x, r) ** 2),
+            valid, y - jnp.sqrt(r ** 2 - jnp.minimum(x, r) ** 2),
             0), (1, 2)) / jnp.sum(lim, (1, 2))
         rmse = jnp.sqrt(jnp.sum(jnp.where(
-            x < lim, (jnp.sqrt(x ** 2 + (y - y_c[ax_oxx]) ** 2) - r) ** 2,
+            valid, (jnp.sqrt(x ** 2 + (y - y_c[ax_oxx]) ** 2) - r) ** 2,
             0), (1, 2)) / jnp.sum(lim, (1, 2)))
         return Surface(self.config, self.fit, y_c / self.w, rmse)
 
@@ -945,6 +945,8 @@ class Circles(namedtuple("Circles", (
 
 class Surface(namedtuple("Surface", (
         "config", "edge", "center_2nd", "rmse"))):
+    x_c = -(math.sqrt(2) + math.log(1 + math.sqrt(2))) / 4
+
     @property
     def revolutions(self):
-        return jnp.concat((jnp.linspace(0, 1, self.config.rays),) * 2)
+        return jnp.concat((jnp.linspace(0, 1, self.config.rays, False),) * 2)
