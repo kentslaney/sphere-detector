@@ -2,15 +2,22 @@
 from .detect import Config, Raster
 from .utils import local
 
-target = Config.resolution
-
 import jax
 import jax.numpy as jnp
+
+from jax._src.lib.mlir import ir
+from jax._src.interpreters import mlir as jax_mlir
+from jax.export import export
+
+dist = local / "dist"
+dist.mkdir(parents=True, exist_ok=True)
+
+target = Config.resolution
 
 @jax.jit
 def jax_density(x):
     x = x.reshape(target)
-    confidence, coordinates = Raster(jnp.array([]), x).opt().surface.predict()
+    confidence, coordinates = Raster(jnp.array([]), x).opt().predict()
     confidence = jnp.astype(confidence, jnp.float16)
     coordinates /= jnp.tile(jnp.array(target), [1, 2])
     coordinates = jnp.hstack((
@@ -19,17 +26,13 @@ def jax_density(x):
     coordinates = jnp.astype(coordinates, jnp.float16)
     return confidence, coordinates
 
-from jax._src.lib.mlir import ir
-from jax._src.interpreters import mlir as jax_mlir
-from jax.export import export
-
 context = jax_mlir.make_ir_context()
 input_shapes = (jnp.zeros((1, 1) + target, dtype=jnp.float16),)
 jax_exported = export(jax_density)(*input_shapes)
 hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 
-# print(jax_density.lower(*input_shapes).as_text())
-# exit(0)
+with open(dist / "jaxpr.mlir", "w") as fp:
+    fp.write(jax_density.lower(*input_shapes).as_text())
 
 import coremltools as ct
 from stablehlo_coreml.converter import convert
@@ -63,9 +66,6 @@ cml_model = ct.convert(
 )
 
 logger.setLevel(logger_level)
-
-dist = local / "dist"
-dist.mkdir(parents=True, exist_ok=True)
 
 spec = cml_model.get_spec()
 # ct.utils.rename_feature(spec, '_arg0', 'depth')

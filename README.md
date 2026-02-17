@@ -17,7 +17,6 @@ python -m src.depth-test.export
 ## TODOs
 - Figure out a better repo name
 - End of pipeline NMS via MIL op
-- Live debugging tools
 - Thresholding (possibly in tracking instead of detection)
 
 ```bash

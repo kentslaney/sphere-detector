@@ -809,13 +809,11 @@ class AliasedRay:
     def surface(self):
         x = jnp.arange(self.distance)[None, None] - Surface.x_c
         r = self.fit.radius[:, None, None] - Surface.x_c
-        y_hat = jnp.sqrt(r ** 2 - jnp.minimum(x, r) ** 2)
-        y_hat = jnp.mean(
-                jnp.tile(y_hat, [1, 2 * self.config.rays, 1]),
-                (1, 2), where=self.valid)
 
         y = jnp.concat(self.adjacent, axis=1) * self.w[:, None, None]
-        y_c = jnp.mean(y, (1, 2), where=self.valid) - y_hat
+        y_c = jnp.mean(
+            y - jnp.sqrt(r ** 2 - jnp.minimum(x, r) ** 2), (1, 2),
+            where=self.valid)
 
         residuals = jnp.sqrt(x ** 2 + (y - y_c[:, None, None]) ** 2) - r
         bias = self.skew(residuals)
