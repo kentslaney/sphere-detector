@@ -2,6 +2,7 @@ from .examples import *
 
 import matplotlib.pyplot as plt
 print(Readable(im.debug() for im in [im4, im5, im7, im8]))
+exit(0)
 
 _, ((ax0, ax1), (ax2, ax3)) = plt.subplots(2, 2)
 im4.plot_depths(0, ax0)

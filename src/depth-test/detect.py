@@ -732,16 +732,18 @@ class AliasedRay:
 
     @cached_property
     def occludes(self):
-        res, ax_oxx = [None, None], (slice(None), None, None)
+        res = [None, None]
         for i, series in enumerate(self.adjacent):
             hi = self.depth_mean + self.config.alpha * self.depth_std
             lo = self.depth_mean - self.config.beta * self.depth_std
             lim = self.radius_mean + self.config.chi * self.radius_std
 
-            lo, hi, lim = lo[ax_oxx], hi[ax_oxx], lim[ax_oxx]
+            lo, hi = lo[:, None, None], hi[:, None, None]
+            lim = lim[:, None, None]
             near, far = series[..., :-1], series[..., 1:]
             valid = jnp.logical_and(near >= lo, near < hi)
-            lowers = far - near < -self.config.delta * self.depth_std[ax_oxx]
+            bound = -self.config.delta * self.depth_std[:, None, None]
+            lowers = far - near < bound
             expected = jnp.arange(self.distance - 1)[None, None] < lim
             edge = jnp.logical_and(expected, jnp.logical_and(valid, lowers))
             res[i] = jax.lax.reduce_min(jnp.where(
@@ -768,9 +770,9 @@ class AliasedRay:
     def fit(self):
         samples = jnp.sum(self.points.valid, 1)
         (y_, x_, r), (y, x) = self.points.fit(), jnp.unstack(self.points.points)
-        rmse = jnp.sqrt(jnp.sum(jnp.where(self.points.valid, (
+        rmse = jnp.sqrt(jnp.mean((
             jnp.sqrt((x - x_[:, None]) ** 2 + (y - y_[:, None]) ** 2)
-            - r[:, None]) ** 2, 0), 1) / samples)
+            - r[:, None]) ** 2, 1, where=self.points.valid))
         return Circles(y_, x_, r, samples, rmse)
 
     @cached_property
@@ -793,18 +795,24 @@ class AliasedRay:
 
     @cached_property
     def surface(self):
-        # TODO: skew depths via cov((*concat(steps, 1), y)) min eigh
-        lim, ax_oxx = self.samples[..., None], (slice(None), None, None)
-        x, r = jnp.arange(self.distance)[None, None], self.fit.radius[ax_oxx]
-        y = jnp.concat(self.adjacent, axis=1) * self.w[ax_oxx]
-        valid, x, r = x < lim, x - Surface.x_c, r - Surface.x_c
-        y_c = jnp.sum(jnp.where(
-            valid, y - jnp.sqrt(r ** 2 - jnp.minimum(x, r) ** 2),
-            0), (1, 2)) / jnp.sum(lim, (1, 2))
-        rmse = jnp.sqrt(jnp.sum(jnp.where(
-            valid, (jnp.sqrt(x ** 2 + (y - y_c[ax_oxx]) ** 2) - r) ** 2,
-            0), (1, 2)) / jnp.sum(lim, (1, 2)))
+        x = jnp.arange(self.distance)[None, None]
+        valid = x < self.samples[..., None]
+        r = self.fit.radius[:, None, None]
+        y = jnp.concat(self.adjacent, axis=1) * self.w[:, None, None]
+        x, r = x - Surface.x_c, r - Surface.x_c
+        y_c = jnp.mean(
+            y - jnp.sqrt(r ** 2 - jnp.minimum(x, r) ** 2), (1, 2), where=valid)
+        residuals = y - y_c[:, None, None]
+        residuals = jnp.sqrt(x ** 2 + residuals ** 2) - r
+        rmse = jnp.sqrt(jnp.mean(residuals ** 2, (1, 2), where=valid))
         return Surface(self.config, self.fit, y_c / self.w, rmse)
+
+    def skew(self, residuals, valid):
+        # TODO: center mean and masked covariance for OLS
+        # (C_yy * C_xz - C_xy * C_yz) / Det(Cov(X, Y))
+        # (C_xx * C_yz - C_xy * C_xz) / Det(Cov(X, Y))
+        # jnp.concat((jnp.concat(self.steps, axis=2), residuals[None]))
+        return residuals
 
     @jax.jit
     def predict(self):
@@ -815,8 +823,7 @@ class AliasedRay:
 class Trace(namedtuple("Trace", ("points", "valid"))):
     @jax.jit
     def fit(self):
-        mean = jnp.sum(jnp.where(self.valid, self.points, 0), axis=2) / \
-                jnp.sum(self.valid, axis=1)
+        mean = jnp.mean(self.points, axis=2, where=self.valid)
         y, x = jnp.unstack(
                 jnp.where(self.valid, self.points - mean[..., None], 0), axis=0)
 
