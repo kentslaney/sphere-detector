@@ -457,7 +457,7 @@ class Seives:
             out.append(out[-1].sifted())
         return cls(base.bounds.config, tuple(out))
 
-    def ruler(self, axis): # OEIS A001511
+    def ruler(self, axis):  # OEIS A001511
         up = jnp.ones(self.stack[-1].shape[axis] + 4, dtype=jnp.int32)
         out, pre = ([], []), 2
         for cur in self.stack[:0:-1]:
