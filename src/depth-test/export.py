@@ -86,13 +86,18 @@ model.output_description["confidence"] = (
     "Boxes × 1: Class confidences over [0, 1]. "
     "Emphasis on time/scene-stable meanings. "
     "Reference points as of 0.2.0 (single digit number of test sessions) "
-    "with a resolution of 392×518: "
+    "with data resolution of 392×518 from Depth Anything V2 small unquantized: "
     "0.25 is almost certain, 0.1 is likely, 0.01 is marginal."
 )
 
 model.author = "Kent Slaney"
 model.license = "CC0"
 model.version = "0.2.0"
+model.short_description = (
+    "Looks for 3d curves, "
+    "fits a circle to surrounding depth drop-offs, then "
+    "evaluates spherical depth fit."
+)
 model.user_defined_metadata["com.apple.coreml.model.preview.type"] = \
         "objectDetector" # https://github.com/apple/coremltools/issues/2265
 
