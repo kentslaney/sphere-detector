@@ -1,9 +1,12 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 import matplotlib.pyplot as plt
 from tabulate import tabulate, SEPARATING_LINE
+from PIL import Image
 
 from .detect import Raster
+from .utils import local
 
 def poplt(x=None, init=None):
     if x is not None:
@@ -27,6 +30,11 @@ class Example(Wrapper):
         obj = cls(Raster.file(path, npy, **kw))
         obj.name = pathlib.Path(path).name if name is None else name
         return obj
+
+    def export_depth(self, path=local / "dist" / "preview.tiff"):
+        lo, hi = jnp.min(self.depth.depth), jnp.max(self.depth.depth)
+        rescaled = (self.depth.depth - lo) / (hi - lo)
+        Image.fromarray(np.array(rescaled)).save(path)
 
     def cropped_background(self, fig=None):
         return poplt(fig, lambda ax: ax.imshow(self.cropped()))
