@@ -3,14 +3,16 @@ import coremltools as ct
 from stablehlo_coreml.converter import (
     StableHloConverter, register_optimizations
 )
+from stablehlo_coreml.utils import get_numpy_type
 from coremltools.converters.mil.mil import Builder as mb
 
 class MilNmsConfig:
     iou_threshold = 0.6
 
-def convert(module):
+def convert(module, patch=False, opset_version=ct.target.iOS18):
     register_optimizations()
-    return UniqPatch(opset_version=ct.target.iOS18).convert(module)
+    converter = UniqPatch if patch else StableHloConverter
+    return converter(opset_version=opset_version).convert(module)
 
 class MilInjector(StableHloConverter):
     def __init__(self, *a, **kw):

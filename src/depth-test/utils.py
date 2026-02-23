@@ -4,6 +4,9 @@ from functools import wraps
 
 local = pathlib.Path(__file__).parents[2]
 
+dist = local / "dist"
+dist.mkdir(parents=True, exist_ok=True)
+
 def jax_limit_cache(arg, *excluded, axis=0, maxsize=None):
     cache = OrderedDict()
     def decorator(f):
