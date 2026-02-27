@@ -1,6 +1,7 @@
 import jax, json
 import jax.numpy as jnp
 import coremltools as ct
+import numpy as np
 
 from jax._src.lib.mlir import ir
 from jax._src.interpreters import mlir as jax_mlir
@@ -11,6 +12,7 @@ from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 from .detect import Config, Raster
 from .utils import dist
 from .mil import convert
+from .examples import im4
 
 target = Config.resolution
 
@@ -19,7 +21,7 @@ def jax_density(x):
     return x
 
 context = jax_mlir.make_ir_context()
-input_shapes = (jnp.zeros((1, 1) + target, dtype=jnp.float16),)
+input_shapes = (jnp.zeros(target, dtype=jnp.float32),)
 jax_exported = export(jax_density)(*input_shapes)
 hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 
@@ -46,20 +48,13 @@ cml_model = ct.convert(
     compute_units=ct.ComputeUnit.ALL,
     # compute_units=ct.ComputeUnit.CPU_ONLY,
     pass_pipeline=pipeline,
-    inputs=[ct.ImageType(
-        mil_arg0, shape=target, color_layout=ct.colorlayout.GRAYSCALE_FLOAT16)],
+    inputs=[ct.TensorType(mil_arg0, shape=target, dtype=np.float32)],
 )
 
 # logger.setLevel(logger_level)
 logging.getLogger("coremltools").disabled = False
 
-import numpy as np
-from PIL import Image
-
-from .examples import im4
-
-pil_depth = Image.fromarray(np.array(im4.depth.depth))
-cml_out = cml_model.predict({"_arg0": pil_depth})
+cml_out = cml_model.predict({"_arg0": np.array(im4.depth.depth)})
 fmt_kw = {"sep": "\n", "end": "\n\n"}
 print("CoreML", cml_out, **fmt_kw)
 print("Jax", im4.depth.depth, **fmt_kw)
