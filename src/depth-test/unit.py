@@ -18,7 +18,7 @@ target = Config.resolution
 
 @jax.jit
 def jax_density(x):
-    return x
+    return Raster(None, x, resolution=target).depth.binned().counts
 
 context = jax_mlir.make_ir_context()
 input_shapes = (jnp.zeros(target, dtype=jnp.float32),)
@@ -56,5 +56,5 @@ logging.getLogger("coremltools").disabled = False
 
 cml_out = cml_model.predict({"_arg0": np.array(im4.depth.depth)})
 fmt_kw = {"sep": "\n", "end": "\n\n"}
-print("CoreML", cml_out, **fmt_kw)
-print("Jax", im4.depth.depth, **fmt_kw)
+print("CoreML", *cml_out.values(), **fmt_kw)
+print("Jax", jax_density(im4.depth.depth), **fmt_kw)
