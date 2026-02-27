@@ -29,13 +29,14 @@ model.output_description["confidence"] = (
 
 model.author = "Kent Slaney"
 model.license = "CC0"
-model.version = "0.2.2"
+model.version = "0.2.3"
 model.short_description = (
     "Looks for 3d curves, "
     "fits a circle to surrounding depth drop-offs, then "
     "evaluates spherical depth fit."
 )
-model.user_defined_metadata["com.apple.coreml.model.preview.type"] = \
-        "objectDetector" # https://github.com/apple/coremltools/issues/2265
+# less helpful for MultiArray inputs, but maybe for an E2E preview to distribute
+# model.user_defined_metadata["com.apple.coreml.model.preview.type"] = \
+#         "objectDetector" # https://github.com/apple/coremltools/issues/2265
 
 model.save(str(dist / "spheres.mlpackage"))

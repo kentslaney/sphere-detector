@@ -61,9 +61,10 @@ print("CoreML", cml_im, **fmt_kw)
 print("Jax", jax_out, **fmt_kw)
 print(np.sum(cml_im != jax_out), "of", cml_im.size, "entries changed")
 
-import matplotlib.pyplot as plt
-plt.imshow(cml_im - jax_out)
-plt.show()
+# import matplotlib.pyplot as plt
+
+# plt.imshow(cml_im - jax_out)
+# plt.show()
 
 # fig, (ax0, ax1) = plt.subplots(1, 2)
 # ax0.imshow(cml_im)

@@ -29,7 +29,7 @@ class Config:
     candidates: any = 16  # number of curves to trace
     rays: any = 64  # number of 2d points to fit
     extent: any = 8  # minimum number of radii per diagonal
-    # TODO: MIL integration test for early NMS
+    # TODO: MIL integration test for early NMS (helps resolution invariance)
     early_nms: any = False  # Seives.nms bypass switch
 
     # Bounds

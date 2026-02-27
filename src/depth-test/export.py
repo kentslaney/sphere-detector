@@ -1,7 +1,5 @@
 import jax, json
 import jax.numpy as jnp
-# TODO: consolidate ct.target.iOS18
-# TODO: float16 internals (?)
 import coremltools as ct
 
 from jax._src.lib.mlir import ir
@@ -17,24 +15,23 @@ from .mil import convert
 target = Config.resolution
 
 @jax.jit
-def jax_density(x):
+def jax_center_size_width_first(x):
     confidence, coordinates = Raster(None, x, resolution=target).opt().predict()
-    # TODO: CENTER_SIZE_WIDTH_FIRST
-    return confidence, coordinates
-    coordinates /= jnp.tile(jnp.array(target), [1, 2])
     ll, hh = coordinates[:, 1::-1], coordinates[:, 3:1:-1]
     coordinates = jnp.hstack(((ll + hh) / 2, hh - ll + 1))
+    coordinates /= jnp.tile(jnp.array(target), [1, 2])
     return confidence.reshape((1, 1, -1)), coordinates.T.reshape((1, 4, -1))
 
 context = jax_mlir.make_ir_context()
 input_shapes = (jnp.zeros(target, dtype=jnp.float32),)
-jax_exported = export(jax_density)(*input_shapes)
+jax_exported = export(jax_center_size_width_first)(*input_shapes)
 hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 
-with open(dist / "jaxpr.mlir", "w") as fp:
-    fp.write(jax_density.lower(*input_shapes).as_text())
+# with open(dist / "jaxpr.mlir", "w") as fp:
+#     fp.write(jax_center_size_width_first.lower(*input_shapes).as_text())
 
-mil_program = convert(hlo_module)
+opset_version = ct.target.iOS18
+mil_program = convert(hlo_module, patch=True, opset_version=opset_version)
 
 mil_args = mil_program.functions[
         mil_program.default_function_name].inputs.keys()
@@ -51,10 +48,9 @@ logger.setLevel(logging.ERROR)
 cml_model = ct.convert(
     mil_program,
     source="milinternal",
-    minimum_deployment_target=ct.target.iOS18,
-    # TODO: switch back from CPU_ONLY
+    minimum_deployment_target=opset_version,
     # compute_units=ct.ComputeUnit.ALL,
-    compute_units=ct.ComputeUnit.CPU_ONLY,
+    compute_units=ct.ComputeUnit.CPU_AND_GPU,
     compute_precision=ct.precision.FLOAT32,
     pass_pipeline=pipeline,
     inputs=[ct.TensorType(

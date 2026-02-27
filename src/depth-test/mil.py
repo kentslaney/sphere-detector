@@ -29,11 +29,11 @@ class MilInjector(StableHloConverter):
 
 class UniqPatch(MilInjector):
     def patch(self, confidence, coordinates):
-        n = confidence.shape[-1]
+        iou_threshold = get_numpy_type(coordinates)(MilNmsConfig.iou_threshold)
         coordinates, confidence, _ = mb.non_maximum_suppression(
             boxes=coordinates,
             scores=confidence,
-            iou_threshold=mb.const(val=np.float16(MilNmsConfig.iou_threshold)),
-            max_boxes=n
+            iou_threshold=mb.const(val=iou_threshold),
+            max_boxes=confidence.shape[-1]
         )
         return confidence, coordinates
