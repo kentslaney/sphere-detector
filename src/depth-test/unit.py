@@ -55,6 +55,15 @@ cml_model = ct.convert(
 logging.getLogger("coremltools").disabled = False
 
 cml_out = cml_model.predict({"_arg0": np.array(im4.depth.depth)})
+jax_out = jax_density(im4.depth.depth)
 fmt_kw = {"sep": "\n", "end": "\n\n"}
 print("CoreML", *cml_out.values(), **fmt_kw)
-print("Jax", jax_density(im4.depth.depth), **fmt_kw)
+print("Jax", jax_out, **fmt_kw)
+
+cml_im = next(iter(cml_out.values()))
+
+import matplotlib.pyplot as plt
+fig, (ax0, ax1) = plt.subplots(1, 2)
+ax0.imshow(cml_im)
+ax1.imshow(jax_out)
+plt.show()
