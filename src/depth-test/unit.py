@@ -33,13 +33,11 @@ mil_arg0 = next(iter(mil_args))
 
 pipeline = DEFAULT_HLO_PIPELINE
 pipeline.set_options("common::const_elimination", {"skip_const_by_size": "1e2"})
-# pipeline.remove_passes(['common::add_int16_cast'])
 
 import logging
 from coremltools import _logger as logger
-# logger_level = logger.level
-# logger.setLevel(logging.ERROR)
-logging.getLogger("coremltools").disabled = True
+logger_level = logger.level
+logger.setLevel(logging.ERROR)
 
 cml_model = ct.convert(
     mil_program,
@@ -49,22 +47,25 @@ cml_model = ct.convert(
     # compute_units=ct.ComputeUnit.CPU_ONLY,
     compute_precision=ct.precision.FLOAT32,
     pass_pipeline=pipeline,
-    inputs=[ct.TensorType(mil_arg0, shape=target, dtype=np.float32)],
+    inputs=[ct.TensorType(
+        mil_arg0, shape=target, dtype=ct.converters.mil.mil.types.fp32)],
 )
 
-# logger.setLevel(logger_level)
-logging.getLogger("coremltools").disabled = False
+logger.setLevel(logger_level)
 
 cml_out = cml_model.predict({"_arg0": np.array(im4.depth.depth)})
-jax_out = jax_density(im4.depth.depth)
-fmt_kw = {"sep": "\n", "end": "\n\n"}
-print("CoreML", *cml_out.values(), **fmt_kw)
-print("Jax", jax_out, **fmt_kw)
-
 cml_im = next(iter(cml_out.values()))
+jax_out = np.array(jax_density(im4.depth.depth))
+fmt_kw = {"sep": "\n", "end": "\n\n"}
+print("CoreML", cml_im, **fmt_kw)
+print("Jax", jax_out, **fmt_kw)
+print(np.sum(cml_im != jax_out), "of", cml_im.size, "entries changed")
 
 import matplotlib.pyplot as plt
-fig, (ax0, ax1) = plt.subplots(1, 2)
-ax0.imshow(cml_im)
-ax1.imshow(jax_out)
+plt.imshow(cml_im - jax_out)
 plt.show()
+
+# fig, (ax0, ax1) = plt.subplots(1, 2)
+# ax0.imshow(cml_im)
+# ax1.imshow(jax_out)
+# plt.show()
