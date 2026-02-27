@@ -16,10 +16,10 @@ model.input_description["depth"] = (
     "as formatted by the KITTI dataset."
 )
 model.output_description["coordinates"] = (
-    "Boxes \xd7 CENTER_SIZE_WIDTH_FIRST as proportions"
+    "1 \xd7 CENTER_SIZE_WIDTH_FIRST \xd7 Boxes as proportions"
 )
 model.output_description["confidence"] = (
-    "Boxes \xd7 1: Class confidences over [0, 1]. "
+    "1 \xd7 1 \xd7 Boxes: Class confidences over [0, 1]. "
     "Emphasis on time/scene-stable meanings. "
     "Reference points as of 0.2.0 (single digit number of test sessions) "
     "with data resolution of 392\xd7518 "
