@@ -43,8 +43,8 @@ cml_model = ct.convert(
     mil_program,
     source="milinternal",
     minimum_deployment_target=ct.target.iOS18,
-    compute_units=ct.ComputeUnit.ALL,
-    # compute_units=ct.ComputeUnit.CPU_ONLY,
+    # compute_units=ct.ComputeUnit.ALL,
+    compute_units=ct.ComputeUnit.CPU_ONLY,
     compute_precision=ct.precision.FLOAT32,
     pass_pipeline=pipeline,
     inputs=[ct.TensorType(

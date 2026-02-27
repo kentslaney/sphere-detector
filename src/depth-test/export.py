@@ -19,6 +19,8 @@ target = Config.resolution
 @jax.jit
 def jax_density(x):
     confidence, coordinates = Raster(None, x, resolution=target).opt().predict()
+    # TODO: CENTER_SIZE_WIDTH_FIRST
+    return confidence, coordinates
     coordinates /= jnp.tile(jnp.array(target), [1, 2])
     ll, hh = coordinates[:, 1::-1], coordinates[:, 3:1:-1]
     coordinates = jnp.hstack(((ll + hh) / 2, hh - ll + 1))
@@ -50,9 +52,10 @@ cml_model = ct.convert(
     mil_program,
     source="milinternal",
     minimum_deployment_target=ct.target.iOS18,
-    compute_units=ct.ComputeUnit.ALL,
-    # compute_units=ct.ComputeUnit.CPU_ONLY,
-    # compute_precision=ct.precision.FLOAT32,
+    # TODO: switch back from CPU_ONLY
+    # compute_units=ct.ComputeUnit.ALL,
+    compute_units=ct.ComputeUnit.CPU_ONLY,
+    compute_precision=ct.precision.FLOAT32,
     pass_pipeline=pipeline,
     inputs=[ct.TensorType(
         mil_arg0, shape=target, dtype=ct.converters.mil.mil.types.fp32)],
