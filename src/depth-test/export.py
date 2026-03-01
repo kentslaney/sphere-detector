@@ -12,11 +12,12 @@ from .detect import Config, Raster
 from .utils import dist
 from .mil import convert
 
-target = Config.resolution
+config_kw = {"resolution": (896, 504), "subdivisions": 16}
+target = config_kw.get("resolution", Config.resolution)
 
 @jax.jit
 def jax_center_size_width_first(x):
-    confidence, coordinates = Raster(None, x, resolution=target).opt().predict()
+    confidence, coordinates = Raster(None, x, **config_kw).opt().predict()
     ll, hh = coordinates[:, 1::-1], coordinates[:, 3:1:-1]
     coordinates = jnp.hstack(((ll + hh) / 2, hh - ll + 1))
     coordinates /= jnp.tile(jnp.array(target), [1, 2])
