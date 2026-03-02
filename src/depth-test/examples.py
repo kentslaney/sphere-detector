@@ -1,7 +1,6 @@
 from .display import Example, Readable
-from .utils import local
+from .utils import local, examples
 
-examples = local / "assets" / "examples"
 cache = local / "cache"
 
 im4 = Example.file(examples / "IMG_0004.HEIC", cache / "da2_4.npy", "im4")

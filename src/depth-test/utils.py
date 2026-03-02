@@ -2,7 +2,12 @@ import sys, pathlib, inspect
 from collections import OrderedDict
 from functools import wraps
 
+from PIL import Image
+from pillow_heif import register_heif_opener
+register_heif_opener()
+
 local = pathlib.Path(__file__).parents[2]
+examples = local / "assets" / "examples"
 
 dist = local / "dist"
 dist.mkdir(parents=True, exist_ok=True)

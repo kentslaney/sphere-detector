@@ -8,12 +8,8 @@ import jax.numpy as jnp
 from jax.scipy.signal import correlate2d
 from jax.scipy.optimize import minimize
 
-from .utils import lazy_default, jax_limit_cache
+from .utils import lazy_default, jax_limit_cache, Image
 from .depth import Da2
-
-from PIL import Image
-from pillow_heif import register_heif_opener
-register_heif_opener()
 
 @partial(
         jax.tree_util.register_dataclass,
