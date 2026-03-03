@@ -8,6 +8,9 @@ import numpy as np
 from transformers import AutoModelForDepthEstimation
 from transformers import AutoImageProcessor
 
+from coremltools.converters.mil import Builder as mb
+from coremltools.converters.mil import register_torch_op
+
 from .utils import Image, examples, dist
 from .cml import CmlConfig
 
@@ -78,6 +81,7 @@ class Wrapper(torch.nn.Module):
         self.model = model.model
         self.mean = [255 * x for x in model.mean]
         self.std = [255 * x for x in model.std]
+        self.flattened = CmlConfig.da2_precision == ct.precision.FLOAT32
 
     @torch.no_grad()
     def forward(self, pixel_values):
@@ -89,7 +93,10 @@ class Wrapper(torch.nn.Module):
         outputs = self.model(pixel_values, return_dict=False)
         # Normalize output to `[0, 1]` and add batch size dimension
         normalized = outputs[0] / outputs[0].max()
-        return normalized.squeeze(0)
+        if self.flattened:
+            return normalized.squeeze(0)
+        else:
+            return normalized.unsqueeze(0)
 
 to_trace = Wrapper(model)
 traced_model = torch.jit.trace(to_trace, example_inputs_coreml)
@@ -100,19 +107,18 @@ with torch.no_grad():
 logger.info("preprocessing error", (out - baseline/baseline.max()).abs().max())
 
 input_types = [ct.ImageType(name="image", shape=example_inputs_coreml.shape)]
-# output_types = [ct.ImageType(
-#     "depth", color_layout=ct.colorlayout.GRAYSCALE_FLOAT16)]
-output_types = [ct.TensorType("depth", dtype=ct.converters.mil.mil.types.fp32)]
-
-deployment_target = ct.target.iOS18
-compute_units = ct.ComputeUnit.CPU_AND_GPU
-compute_precision = ct.precision.FLOAT32
-
-from coremltools.converters.mil import Builder as mb
-from coremltools.converters.mil import register_torch_op
-from coremltools.converters.mil.frontend.torch.torch_op_registry import \
-        _TORCH_OPS_REGISTRY
-# del _TORCH_OPS_REGISTRY["upsample_bicubic2d"]
+if to_trace.flattened:
+    compute_units = ct.ComputeUnit.CPU_AND_GPU
+    output_types = [ct.TensorType(
+        "depth", dtype=ct.converters.mil.mil.types.fp32)]
+else:
+    from importlib.metadata import distribution
+    if not distribution("transformers").read_text("direct_url.json"):
+        logger.warn(
+                "exporting for ANE with unpatched transformers distribution")
+    compute_units = ct.ComputeUnit.ALL
+    output_types = [ct.ImageType(
+        "depth", color_layout=ct.colorlayout.GRAYSCALE_FLOAT16)]
 
 @register_torch_op
 def upsample_bicubic2d(context, node):
@@ -139,11 +145,11 @@ def upsample_bicubic2d(context, node):
 
 coreml_model = ct.convert(
     traced_model,
-    minimum_deployment_target = deployment_target,
+    minimum_deployment_target = CmlConfig.opset_version,
     inputs = input_types,
     outputs = output_types,
     compute_units = compute_units,
-    compute_precision = compute_precision,
+    compute_precision = CmlConfig.da2_precision,
 )
 
 coreml_inputs = {"image": scaled_image}
@@ -155,7 +161,7 @@ assert output_array.shape == target
 baseline_np = (baseline / baseline.max()).numpy()[0]
 logger.info("conversion error", np.abs(output_array - baseline_np).max())
 
-model_precision = compute_precision.name.replace("FLOAT", "F")
+model_precision = CmlConfig.da2_precision.name.replace("FLOAT", "F")
 model_name = f"DepthAnythingV2{model.size}{model_precision}"
 coreml_model.name = model_name
 coreml_model.version = "2.0"

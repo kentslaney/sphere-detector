@@ -12,13 +12,15 @@ from .detect import Config
 
 @dataclass
 class CmlConfig(Config):
-    iou_threshold: any = 0.6
     resolution: any = (518, 294)
+    iou_threshold: any = 0.6
+    opset_version: any = ct.target.iOS18
+    da2_precision: any = ct.precision.FLOAT16
 
-def convert(module, patch=False, opset_version=ct.target.iOS18):
+def convert(module, patch=False):
     register_optimizations()
     converter = UniqPatch if patch else StableHloConverter
-    return converter(opset_version=opset_version).convert(module)
+    return converter(opset_version=CmlConfig.opset_version).convert(module)
 
 class MilInjector(StableHloConverter):
     def __init__(self, *a, **kw):

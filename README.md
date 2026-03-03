@@ -15,6 +15,8 @@ python -m src.depth-test.export
 ```
 
 ## TODOs
+- coremltools: allow folding while_loop to const
+- stablehlo_coreml: special case reduce_window for max_pool and sum (conv 1s)
 - Figure out a better repo name
 
 ```bash

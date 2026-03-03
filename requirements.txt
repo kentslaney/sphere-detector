@@ -6,6 +6,7 @@ pillow_heif
 opencv-python
 torch
 torchvision
+# transformers @ git+https://github.com/pcuenca/transformers@dino-ane-patch
 transformers
 # jax[cuda13]
 jax

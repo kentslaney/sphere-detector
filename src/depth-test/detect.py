@@ -41,9 +41,11 @@ class Config:
     delta: any = 0.5  # threshold in standard deviations for ray depth jump
     chi: any = 0.5  # standard deviations above initial mean radius to look
 
+    depth_checkpoint = "vits"
+
 class Raster:
     config = Config()
-    model = Da2('vits')
+    model = Da2
 
     def data(self, *a, **kw):
         return Depth(self.config, *a, **kw)
@@ -68,7 +70,7 @@ class Raster:
 
     @cached_property
     def cache(self):
-        return self.model(self.cropped())
+        return self.model(self.config.depth_checkpoint)(self.cropped())
 
     @cached_property
     def depth(self):

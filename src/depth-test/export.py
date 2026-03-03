@@ -33,8 +33,7 @@ hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 # with open(dist / "jaxpr.mlir", "w") as fp:
 #     fp.write(jax_center_size_width_first.lower(*input_shapes).as_text())
 
-opset_version = ct.target.iOS18
-mil_program = convert(hlo_module, patch=True, opset_version=opset_version)
+mil_program = convert(hlo_module, patch=True)
 
 mil_args = mil_program.functions[
         mil_program.default_function_name].inputs.keys()
@@ -51,7 +50,7 @@ logger.setLevel(logging.ERROR)
 cml_model = ct.convert(
     mil_program,
     source="milinternal",
-    minimum_deployment_target=opset_version,
+    minimum_deployment_target=CmlConfig.opset_version,
     # compute_units=ct.ComputeUnit.ALL,
     compute_units=ct.ComputeUnit.CPU_AND_GPU,
     compute_precision=ct.precision.FLOAT32,
