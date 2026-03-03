@@ -898,5 +898,6 @@ class Surface(namedtuple("Surface", (
 
     @cached_property
     def confidence(self):
+        # TODO: coefficients?
         res = jnp.exp(-(self.rmse + self.edge.rmse + self.loss))
         return jnp.where(jnp.isnan(res), 0, res)

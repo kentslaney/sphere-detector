@@ -10,10 +10,12 @@ from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 
 from .detect import Config, Raster
 from .utils import dist
-from .mil import convert
+from .cml import CmlConfig, convert
 
-config_kw = {"resolution": (518, 294)}
-target = config_kw.get("resolution", Config.resolution)
+config_kw = {
+        k: getattr(CmlConfig, k) for k in CmlConfig.__dataclass_fields__
+        if k in Config.__dataclass_fields__}
+target = CmlConfig.resolution
 
 @jax.jit
 def jax_center_size_width_first(x):

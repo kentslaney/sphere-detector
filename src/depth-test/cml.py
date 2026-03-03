@@ -1,13 +1,19 @@
 import numpy as np
 import coremltools as ct
+from dataclasses import dataclass
+
 from stablehlo_coreml.converter import (
     StableHloConverter, register_optimizations
 )
 from stablehlo_coreml.utils import get_numpy_type
 from coremltools.converters.mil.mil import Builder as mb
 
-class MilNmsConfig:
-    iou_threshold = 0.6
+from .detect import Config
+
+@dataclass
+class CmlConfig(Config):
+    iou_threshold: any = 0.6
+    resolution: any = (518, 294)
 
 def convert(module, patch=False, opset_version=ct.target.iOS18):
     register_optimizations()
@@ -29,7 +35,7 @@ class MilInjector(StableHloConverter):
 
 class UniqPatch(MilInjector):
     def patch(self, confidence, coordinates):
-        iou_threshold = get_numpy_type(coordinates)(MilNmsConfig.iou_threshold)
+        iou_threshold = get_numpy_type(coordinates)(CmlConfig.iou_threshold)
         coordinates, confidence, _ = mb.non_maximum_suppression(
             boxes=coordinates,
             scores=confidence,

@@ -1,17 +1,20 @@
 # https://github.com/huggingface/coreml-examples/blob/main/tutorials/depth-anything-coreml-guide.ipynb
 
 from functools import cached_property
+import torch, torchvision
+import coremltools as ct
+import numpy as np
 
 from transformers import AutoModelForDepthEstimation
 from transformers import AutoImageProcessor
 
+from .utils import Image, examples, dist
+from .cml import CmlConfig
+
 import logging
 logger = logging.getLogger(__name__)
 
-from .utils import Image, examples, dist
-
-# TODO: probably make this importable from .export
-height, width = target = (518, 294)
+height, width = target = CmlConfig.resolution
 
 class Da2:
     size_mapping = { 'vits': 'Small', 'vitb': 'Base', 'vitl': 'Large' }
@@ -53,8 +56,6 @@ def load_image(path):
 
     return image.resize((width, height), resample=Image.BICUBIC)
 
-import torchvision
-
 scaled_image = load_image(examples / "IMG_0004.HEIC")
 example_inputs = torchvision.transforms.functional.pil_to_tensor(scaled_image)
 
@@ -66,9 +67,6 @@ example_inputs = example_inputs / 255.0
 example_inputs = torchvision.transforms.functional.normalize(
         example_inputs, mean=model.mean, std=model.std)
 example_inputs = example_inputs.unsqueeze(0)
-
-import torch
-import numpy as np
 
 with torch.inference_mode():
     outputs = model.model(example_inputs)
@@ -100,9 +98,6 @@ with torch.no_grad():
     out = traced_model(example_inputs_coreml)
 
 logger.info("preprocessing error", (out - baseline/baseline.max()).abs().max())
-
-import coremltools as ct
-import numpy as np
 
 input_types = [ct.ImageType(name="image", shape=example_inputs_coreml.shape)]
 # output_types = [ct.ImageType(
@@ -160,7 +155,6 @@ assert output_array.shape == target
 baseline_np = (baseline / baseline.max()).numpy()[0]
 logger.info("conversion error", np.abs(output_array - baseline_np).max())
 
-# TODO
 model_precision = compute_precision.name.replace("FLOAT", "F")
 model_name = f"DepthAnythingV2{model.size}{model_precision}"
 coreml_model.name = model_name
