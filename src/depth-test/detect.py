@@ -225,13 +225,11 @@ class Depth:  # JAX depth data entry point
     def binned(self):
         indices = Scatter2d.create(self.depth.shape, self.masked)
         counts = indices.scatter('add', 1, 0)
-        flat_0th = jnp.ravel(self.coord[..., 0])
-        flat_1st = jnp.ravel(self.coord[..., 1])
         bounds = Boundary.create(
-            -indices.scatter('min', flat_0th, self.depth.shape[0]),
-            -indices.scatter('min', flat_1st, self.depth.shape[1]),
-            indices.scatter('max', flat_0th, -1),
-            indices.scatter('max', flat_1st, -1))
+            -indices.scatter('min', self.coord[..., 0], self.depth.shape[0]),
+            -indices.scatter('min', self.coord[..., 1], self.depth.shape[1]),
+            indices.scatter('max', self.coord[..., 0], -1),
+            indices.scatter('max', self.coord[..., 1], -1))
         bounds = Bounds(
                 self.config, self.depth.shape, 1, bounds, win_prep(counts),
                 jnp.array([0, 0]), jnp.array([0, 0]), None)
@@ -260,7 +258,7 @@ class Scatter2d:  # memory shuffler
     def scatter(self, mode, value, fill):
         out = jnp.full(self.shape, fill)
         fn = getattr(out.at[self.indices[..., 0], self.indices[..., 1]], mode)
-        return fn(value, mode="drop")
+        return fn(jnp.ravel(value), mode="drop")
 
     def stat(self, values):
         # TODO: this can probably be done without the reshape

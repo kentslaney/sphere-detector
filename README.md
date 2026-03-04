@@ -19,5 +19,4 @@ python -m src.depth-test.export
 ```
 
 ## TODOs
-- coremltools: allow folding while_loop to const
 - Figure out a better repo name
