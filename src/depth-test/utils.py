@@ -1,6 +1,7 @@
 import sys, pathlib, inspect
 from collections import OrderedDict
 from functools import wraps
+import jax.numpy as jnp
 
 from PIL import Image
 from pillow_heif import register_heif_opener
@@ -57,3 +58,8 @@ def lazy_default(**lazy):
                 if k not in bound.arguments})
         return wrapper
     return decorator
+
+def kron_bool(a, b):
+    assert a.ndim == 2 and b.ndim == 2
+    return jnp.logical_and(a[:, None, :, None], b[None, :, None, :]).reshape(
+            a.shape[0] * b.shape[0], a.shape[1] * b.shape[1])

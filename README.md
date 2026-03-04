@@ -14,11 +14,12 @@ python -m src.depth-test.demo
 python -m src.depth-test.export
 ```
 
+```bash
+( grep \[T\]ODO -r src && grep \[T\]ODO -A 99 README.md | tail -n +2 ) | cat -n
+```
+
 ## TODOs
 - coremltools: allow folding while_loop to const
-- stablehlo_coreml: special case reduce_window for max_pool and sum (conv 1s)
+- switch stats to floats to prevent MIL rounding ops
+- switch sign for lower boundary
 - Figure out a better repo name
-
-```bash
-grep TODO -r src | cat -n
-```

@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from jax.scipy.signal import correlate2d
 from jax.scipy.optimize import minimize
 
-from .utils import lazy_default, jax_limit_cache, Image
+from .utils import lazy_default, jax_limit_cache, kron_bool, Image
 from .depth import Da2
 
 @partial(
@@ -18,7 +18,7 @@ from .depth import Da2
             "resolution", "candidates", "rays", "extent", "subdivisions",
             "early_nms"])
 @dataclass(kw_only=True)
-class Config:
+class Config:  # hyperparameters
     # Raster
     resolution: any = (392, 518)  # downsampling resolution (or None)
     subdivisions: any = 8  # minimum number of cells per dimension
@@ -43,7 +43,7 @@ class Config:
 
     depth_checkpoint = "vits"
 
-class Raster:
+class Raster:  # image wrapper non-serializable for JAX
     config = Config()
     model = Da2
 
@@ -130,7 +130,7 @@ class Raster:
         jax.tree_util.register_dataclass,
         data_fields=["config", "depth"], meta_fields=[])
 @dataclass
-class Depth:
+class Depth:  # JAX depth data entry point
     config: any
     depth: any
 
@@ -213,34 +213,35 @@ class Depth:
     def masked(self):
         return jnp.where(self.inwards[..., None], self.centers, -1)
 
+    def stat(self, indices):
+        return BinStat(
+                indices.stat(self.masked[..., 0]),
+                indices.stat(self.masked[..., 1]),
+                indices.stat(self.radii),
+                indices.stat(self.depth),
+                indices.stat(self.w))
+
     @jax.jit
     def binned(self):
-        centers = self.masked.reshape(-1, 2)
-        indices = Casts2d.create(self.depth.shape, self.masked)
+        indices = Scatter2d.create(self.depth.shape, self.masked)
         counts = indices.scatter('add', 1, 0)
         flat_0th = jnp.ravel(self.coord[..., 0])
         flat_1st = jnp.ravel(self.coord[..., 1])
-        bounds = jnp.stack((
+        bounds = Boundary(
             indices.scatter('min', flat_0th, self.depth.shape[0]),
             indices.scatter('min', flat_1st, self.depth.shape[1]),
             indices.scatter('max', flat_0th, -1),
-            indices.scatter('max', flat_1st, -1)), -1)
+            indices.scatter('max', flat_1st, -1))
         bounds = Bounds(
                 self.config, self.depth.shape, 1, bounds, counts,
                 jnp.array([0, 0]), jnp.array([0, 0]), None)
-        return Bins(
-                0, bounds,
-                indices.stat(centers[:, 0]),
-                indices.stat(centers[:, 1]),
-                indices.stat(jnp.ravel(self.radii)),
-                indices.stat(jnp.ravel(self.depth)),
-                indices.stat(jnp.ravel(self.w)))
+        return Bins(0, bounds, self.stat(indices))
 
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["indices"], meta_fields=["shape"])
 @dataclass
-class Casts2d:
+class Scatter2d:  # memory shuffler
     shape: any
     indices: any
 
@@ -262,18 +263,28 @@ class Casts2d:
         return fn(value, mode="drop")
 
     def stat(self, values):
-        return BinStat(
+        # TODO: this can probably be done without the reshape
+        values = jnp.ravel(values)
+        return BinAcc(
                 BinSum(self.scatter('add', values, 0.)),
                 BinSum(self.scatter('add', values ** 2, 0.)))
 
 bin_win = ((2, 2), (2, 2))  # dimensions, strides
+
+# tracks the extrema per image dimension
+class Boundary(namedtuple("Bound", ("lo_0th", "lo_1st", "hi_0th", "hi_1st"))):
+    def area(self):
+        # initial state has difference > 1 for dimension size > 0
+        d0 = jax.lax.max(0, self.hi_0th - self.lo_0th + 1)
+        d1 = jax.lax.max(0, self.hi_1st - self.lo_1st + 1)
+        return jnp.int32(d0) * d1
 
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["config", "bounds", "counts", "origin", "offset"],
         meta_fields=["shape", "scale", "upscale"])
 @dataclass
-class Bounds:
+class Bounds:  # Tracks the scatter density and boundaries for the sources
     config: any
     shape: any
     scale: any
@@ -291,23 +302,17 @@ class Bounds:
 
     def merge(self):
         f = jax.lax.reduce_window
-        inits = tuple(map(self.bounds.dtype.type, self.shape + (-1, -1)))
-        reduced = jnp.stack((
-                f(self.bounds[..., 0], inits[0], jax.lax.min, *bin_win),
-                f(self.bounds[..., 1], inits[1], jax.lax.min, *bin_win),
-                f(self.bounds[..., 2], inits[2], jax.lax.max, *bin_win),
-                f(self.bounds[..., 3], inits[3], jax.lax.max, *bin_win)), -1)
+        inits = tuple(map(self.bounds.lo_0th.dtype.type, self.shape + (-1, -1)))
+        reduced = Boundary(
+                f(self.bounds[0], inits[0], jax.lax.min, *bin_win),
+                f(self.bounds[1], inits[1], jax.lax.min, *bin_win),
+                f(self.bounds[2], inits[2], jax.lax.max, *bin_win),
+                f(self.bounds[3], inits[3], jax.lax.max, *bin_win))
         counts = f(self.counts, 0, jax.lax.add, *bin_win)
         assert bin_win[0] == bin_win[1] == (2, 2)
         return self.__class__(
                 self.config, self.shape, self.scale * bin_win[1][0], reduced,
                 counts, self.origin, self.offset, self.upscale)
-
-    def area(self):
-        hi = jax.lax.max(self.bounds[..., :2], self.bounds[..., 2:]) + (
-                self.bounds[..., 2:] >= 0)
-        y, x = jnp.unstack(hi - self.bounds[..., :2], axis=-1)
-        return jnp.int32(y) * x
 
     @cached_property
     def metric(self):
@@ -315,7 +320,7 @@ class Bounds:
         #     counts ** phi / area / scale ** (2 * (phi - 1))
         #     (area / scale ** 2) ** (phi - 1)
         # which is resolution invariant
-        areas, total = self.area(), self.counts.size
+        areas, total = self.bounds.area(), self.counts.size
         stabilization = self.config.eps * total * self.scale ** 2
         return (self.counts ** self.config.phi) / (areas + stabilization) / \
                 self.scale ** (2 * (self.config.phi - 1))
@@ -323,8 +328,9 @@ class Bounds:
     def __getitem__(self, key):
         offset = jnp.array([i.start for i in key])
         origin = offset * self.scale + self.origin
+        bound = Boundary(*(x[key] for x in self.bounds))
         return self.__class__(
-                self.config, self.shape, self.scale, self.bounds[key],
+                self.config, self.shape, self.scale, bound,
                 self.counts[key], origin, offset, self.counts.shape)
 
     @jax.jit
@@ -336,8 +342,9 @@ class Bounds:
             if val is None:
                 hi, val = total, shift
             else:
-                hi, val = jax.lax.cond(
-                        total > hi, lambda: (total, shift), lambda: (hi, val))
+                pred = total > hi
+                hi = jax.tree.map(lambda *a: jnp.where(pred, *a), total, hi)
+                val = jax.tree.map(lambda *a: jnp.where(pred, *a), shift, val)
         return val
 
     @cached_property
@@ -356,20 +363,22 @@ class Bounds:
         assert self.scale > 1
         return tuple((i - 1) % 2 for i in self.upscale)
 
+# stat fields for scatter dataflow
+StatContainer = namedtuple("Stat", (
+        'center_0th', 'center_1st', 'radius', 'depth', 'w'))
+class BinStat(StatContainer):  # BinAcc for each stat field
+    def merge(self, bounds):
+        return self.__class__(*(x.merge(bounds.offset) for x in self))
+
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=[
-            "bounds", "center_0th", "center_1st", "radius", "depth", "w"],
+        data_fields=["bounds", "stats"],
         meta_fields=["level"])
 @dataclass
-class Bins:
+class Bins:  # wraps boundary tracking with stat tracking
     level: any
     bounds: any
-    center_0th: any
-    center_1st: any
-    radius: any
-    depth: any
-    w: any
+    stats: any
 
     @property
     def counts(self):
@@ -381,13 +390,7 @@ class Bins:
 
     def sifted(self):
         bounds = self.bounds.sifted()
-        return self.__class__(
-                self.level + 1, bounds,
-                self.center_0th.merge(bounds.offset),
-                self.center_1st.merge(bounds.offset),
-                self.radius.merge(bounds.offset),
-                self.depth.merge(bounds.offset),
-                self.w.merge(bounds.offset))
+        return self.__class__(self.level + 1, bounds, self.stats.merge(bounds))
 
     @cached_property
     def primaries(self):
@@ -424,24 +427,17 @@ class Bins:
         upscaled = jnp.repeat(jnp.repeat(inc, 2, 0), 2, 1)
         return upscaled * self.primaries
 
-    stats = ('center_0th', 'center_1st', 'radius', 'depth', 'w')
-    # means then variances
     def stat(self):
-        out = []
-        for i in self.stats:
-            out.append(getattr(self, i).stat(self.counts))
-        return jnp.stack(sum(zip(*out), ()), axis=-1)
-
-def kron_bool(a, b):
-    assert a.ndim == 2 and b.ndim == 2
-    return jnp.logical_and(a[:, None, :, None], b[None, :, None, :]).reshape(
-            a.shape[0] * b.shape[0], a.shape[1] * b.shape[1])
+        summaries = [x.summary(self.counts) for x in self.stats]
+        return Summary(*(
+                StatContainer(*(getattr(x, i) for x in summaries))
+                for i in Summary._fields))
 
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["config", "stack"], meta_fields=[])
 @dataclass
-class Seives:
+class Seives:  # Feature Pyramid
     config: any
     stack: any
 
@@ -570,66 +566,56 @@ class Seives:
         values, indices = jax.lax.top_k(values, candidates)
         return values, indices
 
-    def flattened(self, f):
+    def flattened(self, indices, f):
         res = None
         for layer in self.stack[-1::-1]:
-            adding = f(layer).reshape(layer.counts.size, -1)
+            adding = jax.tree.map(jnp.ravel, f(layer))
             if res is None:
                 res = adding
             else:
-                res = jnp.concatenate((res, adding))
-        return res
+                res = jax.tree.map(lambda *x: jnp.concatenate(x), res, adding)
+        return jax.tree.map(lambda x: x[indices], res)
 
     def bound(self, candidates):
         values, indices = self.nominate(candidates)
-        return values, self.flattened(lambda x: x.bounds.bounds)[indices]
+        return values, self.flattened(indices, lambda x: x.bounds.bounds)
 
     def stat(self, candidates):
-        # TODO: avoid flattening the stats to enable dead op removal
         values, indices = self.nominate(candidates)
-        return FlatStat(values, self.flattened(lambda x: x.stat())[indices])
+        return FlatStat(values, self.flattened(indices, lambda x: x.stat()))
+
+# processed accumulator outputs for a single data field
+Summary = namedtuple("SufficientStat", ("mean", "var"))
 
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["confidence", "stats"], meta_fields=[])
 @dataclass
-class FlatStat:
+class FlatStat:  # features flattened across pyramid layers and image dimensions
     confidence: any
     stats: any
 
-    order = Bins.stats
-
-    def __post_init__(self, *a, **kw):
-        assert self.stats.shape[-1] == len(self.order) * 2
-        assert self.stats.ndim == 2
-
-    @cached_property
+    @property
     def mean(self):
-        return SiftedMeans(*jnp.unstack(
-            self.stats[:, :len(self.order)], axis=-1))
+        return SiftedMeans(*self.stats.mean)
 
-    @cached_property
+    @property
     def var(self):
-        return namedtuple('Variances', self.order)(*jnp.unstack(
-            self.stats[:, len(self.order):], axis=-1))
+        return self.stats.var
 
     @cached_property
     def std(self):
-        return namedtuple('StandardDeviations', self.order)(*map(
-            jnp.sqrt, self.var))
-
-    def offset(self, origin):
-        return self.__class__(self.stats.at[0, :2].subtract(origin))
+        return StatContainer(*map(jnp.sqrt, self.var))
 
     @cached_property
     def mode(self):
         # assumes that the stats are a gamma distribution (right skew)
         theta = tuple(i / j for i, j in zip(self.var, self.mean))
         alpha = tuple(i / j for i, j in zip(self.mean, theta))
-        return namedtuple('Modes', self.order)(*(
+        return StatContainer(*(
             jnp.where(i >= 1, (i - 1) * j, 0) for i, j in zip(alpha, theta)))
 
-class SiftedMeans(namedtuple('Means', FlatStat.order)):
+class SiftedMeans(StatContainer):  # convenience property for spacial data
     @property
     def centers(self):
         return jnp.stack((self.center_0th, self.center_1st), -1)
@@ -638,28 +624,26 @@ class SiftedMeans(namedtuple('Means', FlatStat.order)):
         jax.tree_util.register_dataclass,
         data_fields=["sum", "sum_sq"], meta_fields=[])
 @dataclass
-class BinStat:
+class BinAcc:  # holds intermediate data accumulation state
     sum: any
     sum_sq: any
 
     def merge(self, offset):
-        return BinStat(self.sum.merge(offset), self.sum_sq.merge(offset))
+        return self.__class__(self.sum.merge(offset), self.sum_sq.merge(offset))
 
     def mean(self, counts):
         return self.sum.sum / counts
 
-    def var(self, counts):
-        return (self.sum_sq.sum - self.sum.sum ** 2 / counts) / (counts - 1)
-
-    def stat(self, counts):
+    def summary(self, counts):
         mean = self.mean(counts)
-        return mean, (self.sum_sq.sum - self.sum.sum * mean) / (counts - 1)
+        return Summary(mean, (
+            self.sum_sq.sum - self.sum.sum * mean) / (counts - 1))
 
 @partial(
         jax.tree_util.register_dataclass,
         data_fields=["sum"], meta_fields=[])
 @dataclass
-class BinSum:
+class BinSum:  # holds sum for 2d binary merges
     sum: any
 
     def merge(self, offset):
@@ -675,7 +659,7 @@ class BinSum:
             "radius_mean", "radius_std", "w"],
         meta_fields=["distance"])
 @dataclass
-class AliasedRay:
+class AliasedRay:  # represents the curve centers to fit from
     config: any
     depth: any
     origin: any
@@ -841,7 +825,7 @@ class AliasedRay:
         surface = self.surface
         return surface.confidence[surface.order], surface.bounds[surface.order]
 
-class Trace(namedtuple("Trace", ("points", "valid"))):
+class Trace(namedtuple("Trace", ("points", "valid"))):  # masked 2d drop-offs
     @jax.jit
     def fit(self):
         mean = jnp.mean(self.points, axis=2, where=self.valid)
@@ -863,7 +847,7 @@ class Trace(namedtuple("Trace", ("points", "valid"))):
         a_, b_, c = (jnp.linalg.det(cramer(i)) / det for i in range(3))
         return a_ + mean[0], b_ + mean[1], jnp.sqrt(c + a_ ** 2 + b_ ** 2)
 
-class Circles(namedtuple("Circles", (
+class Circles(namedtuple("Circles", (  # 2d fit results
         "center_0th", "center_1st", "radius", "samples", "rmse"))):
     @property
     def bounds(self):
@@ -875,7 +859,7 @@ class Circles(namedtuple("Circles", (
     def valid(self):
         return self.samples > 3  # avoid vacantly 0 RMSE
 
-class Surface(namedtuple("Surface", (
+class Surface(namedtuple("Surface", (  # depth slice along AliasedRay
         "config", "edge", "center_2nd", "rmse", "skew"))):
     x_c = -(math.sqrt(2) + math.log(1 + math.sqrt(2))) / 4
 
