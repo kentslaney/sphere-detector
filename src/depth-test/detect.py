@@ -750,7 +750,7 @@ class AliasedRay:  # represents the curve centers to fit from
 
     # (2, self.candidates, self.theta.size)
     @cached_property
-    def points(self):
+    def _points(self):
         (x0, x1), (y0, y1), (z0, z1) = self.steps, self.adjacent, self.occludes
         dims = jax.lax.GatherDimensionNumbers((2,), (), (2,), (0, 1), (0, 1))
         w0 = jnp.stack((
@@ -765,7 +765,7 @@ class AliasedRay:  # represents the curve centers to fit from
 
     # (2, self.candidates, self.theta.size)
     @cached_property
-    def _points(self):
+    def points(self):
         (x0, x1), (y0, y1) = self.steps, self.occludes
         z0, z1 = y0[..., None], y1[..., None]
         dims = jax.lax.GatherDimensionNumbers((2,), (), (2,), (0, 1), (0, 1))
