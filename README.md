@@ -20,6 +20,5 @@ python -m src.depth-test.export
 
 ## TODOs
 - coremltools: allow folding while_loop to const
-- switch stats to floats to prevent MIL rounding ops
 - switch sign for lower boundary
 - Figure out a better repo name

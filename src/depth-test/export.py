@@ -40,7 +40,8 @@ mil_args = mil_program.functions[
 mil_arg0 = next(iter(mil_args))
 
 pipeline = DEFAULT_HLO_PIPELINE
-pipeline.set_options("common::const_elimination", {"skip_const_by_size": "1e2"})
+pipeline.set_options("common::const_elimination", {
+    "skip_const_by_size": CmlConfig.rays * CmlConfig.candidates * 4})
 
 import logging
 from coremltools import _logger as logger

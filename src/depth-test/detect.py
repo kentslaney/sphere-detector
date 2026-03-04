@@ -227,13 +227,13 @@ class Depth:  # JAX depth data entry point
         counts = indices.scatter('add', 1, 0)
         flat_0th = jnp.ravel(self.coord[..., 0])
         flat_1st = jnp.ravel(self.coord[..., 1])
-        bounds = Boundary(
+        bounds = Boundary.create(
             indices.scatter('min', flat_0th, self.depth.shape[0]),
             indices.scatter('min', flat_1st, self.depth.shape[1]),
             indices.scatter('max', flat_0th, -1),
             indices.scatter('max', flat_1st, -1))
         bounds = Bounds(
-                self.config, self.depth.shape, 1, bounds, counts,
+                self.config, self.depth.shape, 1, bounds, win_prep(counts),
                 jnp.array([0, 0]), jnp.array([0, 0]), None)
         return Bins(0, bounds, self.stat(indices))
 
@@ -270,14 +270,20 @@ class Scatter2d:  # memory shuffler
                 BinSum(self.scatter('add', values ** 2, 0.)))
 
 bin_win = ((2, 2), (2, 2))  # dimensions, strides
+# MIL max_pool only supports float
+win_prep = jnp.float32 # lambda x: x
 
 # tracks the extrema per image dimension
 class Boundary(namedtuple("Bound", ("lo_0th", "lo_1st", "hi_0th", "hi_1st"))):
     def area(self):
         # initial state has difference > 1 for dimension size > 0
-        d0 = jax.lax.max(0, self.hi_0th - self.lo_0th + 1)
-        d1 = jax.lax.max(0, self.hi_1st - self.lo_1st + 1)
-        return jnp.int32(d0) * d1
+        d0 = jnp.maximum(0, self.hi_0th - self.lo_0th + 1)
+        d1 = jnp.maximum(0, self.hi_1st - self.lo_1st + 1)
+        return d0 * d1
+
+    @classmethod
+    def create(cls, *a):
+        return cls(*map(win_prep, a))
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -396,8 +402,8 @@ class Bins:  # wraps boundary tracking with stat tracking
     def primaries(self):
         assert bin_win[0] == bin_win[1] == (2, 2)
         centers = self.bounds.centers
-        primary_0th = self.center_0th.mean(self.counts) > centers[..., 0]
-        primary_1st = self.center_1st.mean(self.counts) > centers[..., 1]
+        primary_0th = self.stats.center_0th.mean(self.counts) > centers[..., 0]
+        primary_1st = self.stats.center_1st.mean(self.counts) > centers[..., 1]
         alternating = jnp.array([True, False])
         alternating_0th = jnp.tile(alternating[:, None], self.shape)
         alternating_1st = jnp.tile(alternating[None, :], self.shape)
