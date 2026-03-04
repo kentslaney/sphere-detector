@@ -9,12 +9,12 @@ from jax.export import export
 
 from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 
-from .detect import Config, Raster
+from .detect import Raster
 from .utils import dist
-from .mil import convert
-from .examples import im4
+from .cml import CmlConfig, convert
+from .integration import im4_cml
 
-target = Config.resolution
+target = CmlConfig.resolution
 
 @jax.jit
 def jax_density(x):
@@ -53,9 +53,9 @@ cml_model = ct.convert(
 
 logger.setLevel(logger_level)
 
-cml_out = cml_model.predict({"_arg0": np.array(im4.depth.depth)})
+cml_out = cml_model.predict({"_arg0": np.array(im4_cml.depth.depth)})
 cml_im = next(iter(cml_out.values()))
-jax_out = np.array(jax_density(im4.depth.depth))
+jax_out = np.array(jax_density(im4_cml.depth.depth))
 fmt_kw = {"sep": "\n", "end": "\n\n"}
 print("CoreML", cml_im, **fmt_kw)
 print("Jax", jax_out, **fmt_kw)

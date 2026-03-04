@@ -1,3 +1,5 @@
+import jax
+import jax.numpy as jnp
 import numpy as np
 import coremltools as ct
 from dataclasses import dataclass
@@ -8,7 +10,7 @@ from stablehlo_coreml.converter import (
 from stablehlo_coreml.utils import get_numpy_type
 from coremltools.converters.mil.mil import Builder as mb
 
-from .detect import Config
+from .detect import Config, Raster
 
 @dataclass
 class CmlConfig(Config):
@@ -16,6 +18,18 @@ class CmlConfig(Config):
     iou_threshold: any = 0.6
     opset_version: any = ct.target.iOS18
     da2_precision: any = ct.precision.FLOAT16
+
+config_kw = {
+        k: getattr(CmlConfig, k) for k in CmlConfig.__dataclass_fields__
+        if k in Config.__dataclass_fields__}
+
+@jax.jit
+def jax_center_size_width_first(x):
+    confidence, coordinates = Raster(None, x, **config_kw).opt().predict()
+    ll, hh = coordinates[:, 1::-1], coordinates[:, 3:1:-1]
+    coordinates = jnp.hstack(((ll + hh) / 2, hh - ll + 1))
+    coordinates /= jnp.tile(jnp.array(CmlConfig.resolution[::-1]), [1, 2])
+    return confidence.reshape((1, 1, -1)), coordinates.T.reshape((1, 4, -1))
 
 def convert(module, patch=False):
     register_optimizations()

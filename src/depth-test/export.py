@@ -1,4 +1,4 @@
-import jax, json
+import jax
 import jax.numpy as jnp
 import coremltools as ct
 
@@ -8,25 +8,11 @@ from jax.export import export
 
 from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 
-from .detect import Config, Raster
 from .utils import dist
-from .cml import CmlConfig, convert
-
-config_kw = {
-        k: getattr(CmlConfig, k) for k in CmlConfig.__dataclass_fields__
-        if k in Config.__dataclass_fields__}
-target = CmlConfig.resolution
-
-@jax.jit
-def jax_center_size_width_first(x):
-    confidence, coordinates = Raster(None, x, **config_kw).opt().predict()
-    ll, hh = coordinates[:, 1::-1], coordinates[:, 3:1:-1]
-    coordinates = jnp.hstack(((ll + hh) / 2, hh - ll + 1))
-    coordinates /= jnp.tile(jnp.array(target[::-1]), [1, 2])
-    return confidence.reshape((1, 1, -1)), coordinates.T.reshape((1, 4, -1))
+from .cml import CmlConfig, convert, jax_center_size_width_first
 
 context = jax_mlir.make_ir_context()
-input_shapes = (jnp.zeros(target, dtype=jnp.float32),)
+input_shapes = (jnp.zeros(CmlConfig.resolution, dtype=jnp.float32),)
 jax_exported = export(jax_center_size_width_first)(*input_shapes)
 hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 
@@ -56,7 +42,8 @@ cml_model = ct.convert(
     compute_precision=ct.precision.FLOAT32,
     pass_pipeline=pipeline,
     inputs=[ct.TensorType(
-        mil_arg0, shape=target, dtype=ct.converters.mil.mil.types.fp32)],
+        mil_arg0, shape=CmlConfig.resolution,
+        dtype=ct.converters.mil.mil.types.fp32)],
 )
 
 logger.setLevel(logger_level)
