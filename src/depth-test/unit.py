@@ -57,5 +57,5 @@ logger.setLevel(logger_level)
 cml_out = cml_model.predict({"_arg0": np.array(im4_cml.depth.depth)})
 jax_out = jax_density(im4_cml.depth.depth)
 fmt_kw = {"sep": "\n", "end": "\n\n"}
-print("CoreML", *cml_out.values(), **fmt_kw)
+print("CoreML", *[cml_out[k] for k in cml_model.output_description], **fmt_kw)
 print("Jax", *jax_out, **fmt_kw)
