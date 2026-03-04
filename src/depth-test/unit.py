@@ -18,7 +18,8 @@ target = CmlConfig.resolution
 
 @jax.jit
 def jax_density(x):
-    return Raster(None, x, resolution=target).depth.binned().counts
+    return jax.tree_util.tree_flatten(
+            Raster(None, x, resolution=target).stat())[0]
 
 context = jax_mlir.make_ir_context()
 input_shapes = (jnp.zeros(target, dtype=jnp.float32),)
@@ -54,19 +55,7 @@ cml_model = ct.convert(
 logger.setLevel(logger_level)
 
 cml_out = cml_model.predict({"_arg0": np.array(im4_cml.depth.depth)})
-cml_im = next(iter(cml_out.values()))
-jax_out = np.array(jax_density(im4_cml.depth.depth))
+jax_out = jax_density(im4_cml.depth.depth)
 fmt_kw = {"sep": "\n", "end": "\n\n"}
-print("CoreML", cml_im, **fmt_kw)
-print("Jax", jax_out, **fmt_kw)
-print(np.sum(cml_im != jax_out), "of", cml_im.size, "entries changed")
-
-# import matplotlib.pyplot as plt
-
-# plt.imshow(cml_im - jax_out)
-# plt.show()
-
-# fig, (ax0, ax1) = plt.subplots(1, 2)
-# ax0.imshow(cml_im)
-# ax1.imshow(jax_out)
-# plt.show()
+print("CoreML", *cml_out.values(), **fmt_kw)
+print("Jax", *jax_out, **fmt_kw)
