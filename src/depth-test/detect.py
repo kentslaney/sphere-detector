@@ -228,8 +228,8 @@ class Depth:  # JAX depth data entry point
         flat_0th = jnp.ravel(self.coord[..., 0])
         flat_1st = jnp.ravel(self.coord[..., 1])
         bounds = Boundary.create(
-            indices.scatter('min', flat_0th, self.depth.shape[0]),
-            indices.scatter('min', flat_1st, self.depth.shape[1]),
+            -indices.scatter('min', flat_0th, self.depth.shape[0]),
+            -indices.scatter('min', flat_1st, self.depth.shape[1]),
             indices.scatter('max', flat_0th, -1),
             indices.scatter('max', flat_1st, -1))
         bounds = Bounds(
@@ -277,8 +277,8 @@ win_prep = jnp.float32 # lambda x: x
 class Boundary(namedtuple("Bound", ("lo_0th", "lo_1st", "hi_0th", "hi_1st"))):
     def area(self):
         # initial state has difference > 1 for dimension size > 0
-        d0 = jnp.maximum(0, self.hi_0th - self.lo_0th + 1)
-        d1 = jnp.maximum(0, self.hi_1st - self.lo_1st + 1)
+        d0 = jnp.maximum(0, self.hi_0th + self.lo_0th + 1)
+        d1 = jnp.maximum(0, self.hi_1st + self.lo_1st + 1)
         return d0 * d1
 
     @classmethod
@@ -308,10 +308,11 @@ class Bounds:  # Tracks the scatter density and boundaries for the sources
 
     def merge(self):
         f = jax.lax.reduce_window
-        inits = tuple(map(self.bounds.lo_0th.dtype.type, self.shape + (-1, -1)))
+        inits = [-x for x in self.shape] + [-1, -1]
+        inits = tuple(map(self.bounds.lo_0th.dtype.type, inits))
         reduced = Boundary(
-                f(self.bounds[0], inits[0], jax.lax.min, *bin_win),
-                f(self.bounds[1], inits[1], jax.lax.min, *bin_win),
+                f(self.bounds[0], inits[0], jax.lax.max, *bin_win),
+                f(self.bounds[1], inits[1], jax.lax.max, *bin_win),
                 f(self.bounds[2], inits[2], jax.lax.max, *bin_win),
                 f(self.bounds[3], inits[3], jax.lax.max, *bin_win))
         counts = f(self.counts, 0, jax.lax.add, *bin_win)
