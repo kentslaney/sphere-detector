@@ -37,7 +37,6 @@ cml_model = ct.convert(
     mil_program,
     source="milinternal",
     minimum_deployment_target=CmlConfig.opset_version,
-    # compute_units=ct.ComputeUnit.ALL,
     compute_units=ct.ComputeUnit.CPU_AND_GPU,
     compute_precision=ct.precision.FLOAT32,
     pass_pipeline=pipeline,

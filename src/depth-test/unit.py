@@ -18,10 +18,9 @@ target = CmlConfig.resolution
 
 @jax.jit
 def jax_density(x):
+    return Raster(None, x, resolution=target).opt().predict()
     return jax.tree_util.tree_flatten(
-            Raster(None, x, resolution=target).opt().points)[0] + \
-        jax.tree_util.tree_flatten(
-                Raster(None, x, resolution=target).opt()._points)[0]
+            Raster(None, x, resolution=target).opt().points)[0]
 
 context = jax_mlir.make_ir_context()
 input_shapes = (jnp.zeros(target, dtype=jnp.float32),)
