@@ -272,8 +272,7 @@ class Scatter2d:  # memory shuffler
 
 bin_win = ((2, 2), (2, 2))  # dimensions, strides
 # MIL max_pool only supports float
-# win_prep = jnp.float32 # lambda x: x
-win_prep = lambda x: x
+win_prep = jnp.float32 # lambda x: x
 
 # tracks the extrema per image dimension
 class Boundary(namedtuple("Bound", ("lo_0th", "lo_1st", "hi_0th", "hi_1st"))):
