@@ -1,4 +1,4 @@
-import sys, pathlib, inspect
+import sys, pathlib, inspect, re
 from collections import OrderedDict
 from functools import wraps
 import jax.numpy as jnp
@@ -63,3 +63,18 @@ def kron_bool(a, b):
     assert a.ndim == 2 and b.ndim == 2
     return jnp.logical_and(a[:, None, :, None], b[None, :, None, :]).reshape(
             a.shape[0] * b.shape[0], a.shape[1] * b.shape[1])
+
+patch_label = "patch_tag_runtime_callsite"
+patch_sep = ".<locals>."
+
+def patch_tag(name):
+    assert bool(re.match(r"^[a-zA-Z_]\w*$", name))
+    code = f"""
+        def {patch_label}(f):
+            @wraps(f)
+            def {name}(*a, **kw):
+                return f(*a, **kw)
+            return {name}
+    """
+    exec(code.replace(code[:len(code) - len(code.lstrip())], "\n").rstrip())
+    return locals()[patch_label]

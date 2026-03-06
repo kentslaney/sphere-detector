@@ -11,6 +11,7 @@ from stablehlo_coreml.utils import get_numpy_type
 from coremltools.converters.mil.mil import Builder as mb
 
 from .detect import Config, Raster
+from .utils import patch_label, patch_sep
 
 @dataclass
 class CmlConfig(Config):
@@ -31,17 +32,45 @@ def jax_center_size_width_first(x):
     coordinates /= jnp.tile(jnp.array(CmlConfig.resolution[::-1]), [1, 2])
     return confidence.reshape((1, 1, -1)), coordinates.T.reshape((1, 4, -1))
 
-def convert(module, patch=False):
+def convert(module, patch_tags=True, patch_output=False):
     register_optimizations()
-    converter = UniqPatch if patch else StableHloConverter
+    converter = UniqPatch if patch_output else TagPatcher
+    if not patch_tags:
+        converter.tag_map = None
     return converter(opset_version=CmlConfig.opset_version).convert(module)
 
-class MilInjector(StableHloConverter):
+DefaultConverter = StableHloConverter
+
+class RegisteredConverter(DefaultConverter):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
-        self._stablehlo_ops_registry = \
-                __class__.__bases__[0]._stablehlo_ops_registry
+        self._stablehlo_ops_registry = DefaultConverter._stablehlo_ops_registry
 
+    def default_dispatch(self, context, op):
+        return DefaultConverter._dispatch_op(self, context, op)
+
+class LabelRegistry(RegisteredConverter):
+    def mps_gather_shape(self, context, op):
+        # TODO: gather_along_axis instead of gather
+        return self.default_dispatch(context, op)
+
+class TagPatcher(RegisteredConverter):
+    tag_map = LabelRegistry()
+
+    def _dispatch_op(self, context, op):
+        stack = str(op.location)
+        if patch_label in stack:
+            index = stack.index(patch_label)
+            prefix, postfix = stack[:index], stack[index + len(patch_label):]
+            assert postfix.startswith(patch_sep) and prefix.endswith('""'[0])
+            tag = postfix[len(patch_sep):postfix.index('""'[0])]
+            # one callsite for the decorator and one for the decorated
+            depth = prefix.count("callsite()"[:-1]) - 2  # >= 0
+            if depth == 0 and hasattr(self.tag_map, tag):
+                return getattr(self.tag_map, tag)(context, op)
+        return self.default_dispatch(context, op)
+
+class MilInjector(TagPatcher):
     def process_block(self, context, block):
         self.process_block = super().process_block
         return list(self.patch(*super().process_block(context, block)))

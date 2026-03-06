@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from jax.scipy.signal import correlate2d
 from jax.scipy.optimize import minimize
 
-from .utils import lazy_default, jax_limit_cache, kron_bool, Image
+from .utils import lazy_default, jax_limit_cache, kron_bool, patch_tag, Image
 from .depth import Da2
 
 @partial(
@@ -261,7 +261,6 @@ class Scatter2d:  # memory shuffler
         return fn(jnp.ravel(value), mode="drop")
 
     def stat(self, values):
-        # TODO: this can probably be done without the reshape
         values = jnp.ravel(values)
         return BinAcc(
                 BinSum(self.scatter('add', values, 0.)),
@@ -750,6 +749,7 @@ class AliasedRay:  # represents the curve centers to fit from
 
     # (2, self.candidates, self.theta.size)
     @cached_property
+    @patch_tag("mps_gather_shape")
     def points(self):
         (x0, x1), (y0, y1) = self.steps, self.occludes
         z0, z1 = y0[..., None], y1[..., None]
@@ -903,6 +903,6 @@ class Surface(namedtuple("Surface", (  # depth slice along AliasedRay
 
     @cached_property
     def confidence(self):
-        # TODO: coefficients?
+        # TODO: coefficients for output confidence terms (?)
         res = jnp.exp(-(self.rmse + self.edge.rmse + self.loss))
         return jnp.where(jnp.isnan(res), 0, res)
