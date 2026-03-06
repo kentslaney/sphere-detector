@@ -43,6 +43,15 @@ class Config:  # hyperparameters
 
     depth_checkpoint = "vits"
 
+    @property
+    def diag(self):
+        assert self.resolution is not None
+        return int(sum(i ** 2 for i in self.resolution) ** 0.5)
+
+    @property
+    def distance(self):
+        return self.diag // self.extent
+
 class Raster:  # image wrapper non-serializable for JAX
     config = Config()
     model = Da2
@@ -105,10 +114,6 @@ class Raster:  # image wrapper non-serializable for JAX
         if cache is not None:
             self.cache = cache
 
-    @property
-    def diag(self):
-        return int(sum(i ** 2 for i in self.spec) ** 0.5)
-
     @cached_property
     def seives(self):
         return Seives.create(self.depth.binned())
@@ -123,8 +128,7 @@ class Raster:  # image wrapper non-serializable for JAX
     def opt(self, candidates):
         pred = self.stat(candidates)
         return AliasedRay.from_binstats(
-                self.depth, pred, self.config.rays,
-                self.diag // self.config.extent)
+                self.depth, pred, self.config.rays, self.config.distance)
 
 @partial(
         jax.tree_util.register_dataclass,

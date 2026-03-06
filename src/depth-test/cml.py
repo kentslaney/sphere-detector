@@ -9,6 +9,7 @@ from stablehlo_coreml.converter import (
 )
 from stablehlo_coreml.utils import get_numpy_type
 from coremltools.converters.mil.mil import Builder as mb
+from jax._src.lib.mlir.dialects import hlo
 
 from .detect import Config, Raster
 from .utils import patch_label, patch_sep
@@ -19,6 +20,8 @@ class CmlConfig(Config):
     iou_threshold: any = 0.6
     opset_version: any = ct.target.iOS18
     da2_precision: any = ct.precision.FLOAT16
+
+CmlConfig = CmlConfig()  # discouraged
 
 config_kw = {
         k: getattr(CmlConfig, k) for k in CmlConfig.__dataclass_fields__
@@ -51,8 +54,33 @@ class RegisteredConverter(DefaultConverter):
 
 class LabelRegistry(RegisteredConverter):
     def mps_gather_shape(self, context, op):
-        # TODO: gather_along_axis instead of gather
-        return self.default_dispatch(context, op)
+        if op.name != "stablehlo.gather":
+            return self.default_dispatch(context, op)
+
+        dim_numbers = hlo.GatherDimensionNumbers(op.dimension_numbers)
+        expected_dim_numbers = {
+            "offset_dims": (2,),
+            "operand_batching_dims": (0, 1),
+            "start_indices_batching_dims": (0, 1),
+            "start_index_map": (2,),
+            "index_vector_dim": 2
+        }
+        assert all([
+            type(v)(getattr(dim_numbers, k)) == v
+            for k, v in expected_dim_numbers.items()])
+        assert tuple(op.operand.type.shape) == (
+                CmlConfig.candidates, CmlConfig.rays, CmlConfig.distance)
+        assert tuple(op.start_indices.type.shape) == (
+                CmlConfig.candidates, CmlConfig.rays, 1)
+        assert tuple(op.slice_sizes) == (1, 1, 1)
+
+        start_indices = context[op.start_indices.get_name()]
+        operand = context[op.operand.get_name()]
+
+        res = mb.gather_along_axis(x=operand, indices=start_indices, axis=2)
+
+        context.add_result(op.result, res)
+        return
 
 class TagPatcher(RegisteredConverter):
     tag_map = LabelRegistry()
