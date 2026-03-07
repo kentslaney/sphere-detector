@@ -10,7 +10,6 @@ from jax.export import export
 from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 
 from .detect import Raster
-from .utils import dist
 from .cml import config, convert
 from .integration import im4_cml
 

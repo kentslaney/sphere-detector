@@ -13,7 +13,8 @@ from .depth import Da2
 
 @partial(
         jax.tree_util.register_dataclass,
-        data_fields=["alpha", "beta", "gamma", "delta", "eps", "chi", "phi"],
+        data_fields=[
+            "alpha", "beta", "gamma", "delta", "eps", "chi", "phi", "mu", "nu"],
         meta_fields=[
             "resolution", "candidates", "rays", "extent", "subdivisions",
             "early_nms"])
@@ -40,6 +41,11 @@ class Config:  # hyperparameters
     gamma: any = 0.2  # interpolation value between median and mean for w
     delta: any = 0.5  # threshold in standard deviations for ray depth jump
     chi: any = 0.5  # standard deviations above initial mean radius to look
+
+    # Surface
+    # TODO: tune
+    mu: any = 1.0  # edge RMSE coefficient (remember via lower case shape)
+    nu: any = 2.0  # depth slice RMSE coefficient
 
     depth_checkpoint = "vits"
 
@@ -883,6 +889,7 @@ class Circles(namedtuple("Circles", (  # 2d fit results
 
 class Surface(namedtuple("Surface", (  # depth slice along AliasedRay
         "config", "edge", "center_2nd", "rmse", "skew"))):
+    # mean distance from center of a square's perimeter (line not angle)
     x_c = -(math.sqrt(2) + math.log(1 + math.sqrt(2))) / 4
 
     @property
@@ -906,6 +913,9 @@ class Surface(namedtuple("Surface", (  # depth slice along AliasedRay
 
     @cached_property
     def confidence(self):
-        # TODO: coefficients for output confidence terms (?)
-        res = jnp.exp(-(self.rmse + self.edge.rmse + self.loss))
+        res = jnp.exp(-(
+            self.loss +
+            self.config.nu * self.rmse +
+            self.config.mu * self.edge.rmse
+        ))
         return jnp.where(jnp.isnan(res), 0, res)
