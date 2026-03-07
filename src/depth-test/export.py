@@ -19,7 +19,7 @@ hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 # with open(dist / "jaxpr.mlir", "w") as fp:
 #     fp.write(jax_center_size_width_first.lower(*input_shapes).as_text())
 
-mil_program = convert(hlo_module, patch_tags=True, patch_output=True)
+mil_program = convert(hlo_module, patch_tags=True, patch_output=False)
 
 mil_args = mil_program.functions[
         mil_program.default_function_name].inputs.keys()

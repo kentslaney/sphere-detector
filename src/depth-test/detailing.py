@@ -6,8 +6,8 @@ cml_model = ct.models.MLModel(str(dist / "partial.mlpackage"))
 spec = cml_model.get_spec()
 ct.utils.rename_feature(spec, next(iter(cml_model.input_description)), 'depth')
 it = iter(cml_model.output_description)
-ct.utils.rename_feature(spec, next(it), 'confidence')
-ct.utils.rename_feature(spec, next(it), 'coordinates')
+ct.utils.rename_feature(spec, next(it), 'raw_confidence')
+ct.utils.rename_feature(spec, next(it), 'raw_coordinates')
 model = ct.models.MLModel(spec, weights_dir=cml_model.weights_dir)
 
 model.input_description["depth"] = (
@@ -15,10 +15,10 @@ model.input_description["depth"] = (
     "Proportional to LiDaR raycast distance to projection plane "
     "as formatted by the KITTI dataset."
 )
-model.output_description["coordinates"] = (
+model.output_description["raw_coordinates"] = (
     "1 \xd7 CENTER_SIZE_WIDTH_FIRST \xd7 Boxes as proportions"
 )
-model.output_description["confidence"] = (
+model.output_description["raw_confidence"] = (
     "1 \xd7 1 \xd7 Boxes: Class confidences over [0, 1]. "
     "Emphasis on time/scene-stable meanings. "
     "Reference points as of 0.2.0 (single digit number of test sessions) "

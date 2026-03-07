@@ -76,6 +76,7 @@ def jax_center_size_width_first(x):
     ll, hh = coordinates[:, 1::-1], coordinates[:, 3:1:-1]
     coordinates = jnp.hstack(((ll + hh) / 2, hh - ll + 1))
     coordinates /= jnp.tile(jnp.array(config.resolution[::-1]), [1, 2])
+    return confidence.reshape((-1, 1)), coordinates.reshape((-1, 4))
     return confidence.reshape((1, 1, -1)), coordinates.T.reshape((1, 4, -1))
 
 def convert(module, patch_tags=True, patch_output=False):
