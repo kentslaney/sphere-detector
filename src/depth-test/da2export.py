@@ -1,6 +1,6 @@
 # https://github.com/huggingface/coreml-examples/blob/main/tutorials/depth-anything-coreml-guide.ipynb
 
-import torch, torchvision
+import torch, torchvision, json
 import coremltools as ct
 import numpy as np
 
@@ -15,6 +15,7 @@ from coremltools.converters.mil import register_torch_op
 
 from .utils import Image, examples, dist
 from .cml import config
+from .depth import Da2 as _Da2
 
 import logging
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 height, width = target = config.resolution
 
 class Da2:
-    size_mapping = { 'vits': 'Small', 'vitb': 'Base', 'vitl': 'Large' }
+    size_mapping = _Da2.size_mapping
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
 
@@ -110,8 +111,8 @@ logger.info("preprocessing error", (out - baseline/baseline.max()).abs().max())
 
 input_types = [ct.ImageType(name="image", shape=example_inputs_coreml.shape)]
 patched_transformers = distribution("transformers").read_text("direct_url.json")
-ane_patch = patched_transformers and patched_transformers.endswith(
-        "github.com/pcuenca/transformers@dino-ane-patch")
+ane_patch = patched_transformers and json.loads(
+        patched_transformers)['vcs_info']['commit_id'].startswith("657492e")
 
 if patched_transformers and not ane_patch:
     logger.warn("exporting for ANE with unknown transformers distribution")
@@ -171,8 +172,7 @@ assert output_array.shape == target
 baseline_np = (baseline / baseline.max()).numpy()[0]
 logger.info("conversion error", np.abs(output_array - baseline_np).max())
 
-model_precision = config.da2_precision.name.replace("FLOAT", "F")
-model_name = f"DepthAnythingV2{model.size}{model_precision}"
+model_name = config.da2_name
 coreml_model.name = model_name
 coreml_model.version = "2.0"
 coreml_model.short_description = (

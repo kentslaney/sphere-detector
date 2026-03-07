@@ -14,6 +14,7 @@ from jax._src.lib.mlir.dialects import hlo
 
 from .detect import Config, Raster
 from .utils import patch_label, patch_sep, Image
+from .depth import Da2
 
 class DepthInputMode:
     F16Image = partial(
@@ -54,6 +55,12 @@ class CmlConfig(Config):
         if self.spheres_input is DepthInputMode.F16Image:
             x = Image.fromarray(x)
         return x
+
+    @property
+    def da2_name(self):
+        model_precision = config.da2_precision.name.replace("FLOAT", "F")
+        model_size = Da2.size_mapping[self.depth_checkpoint]
+        return f"DepthAnythingV2{model_size}{model_precision}"
 
 config = CmlConfig()
 config_kw = {

@@ -35,8 +35,5 @@ model.short_description = (
     "fits a circle to surrounding depth drop-offs, then "
     "evaluates spherical depth fit."
 )
-# less helpful for MultiArray inputs, but maybe for an E2E preview to distribute
-# model.user_defined_metadata["com.apple.coreml.model.preview.type"] = \
-#         "objectDetector" # https://github.com/apple/coremltools/issues/2265
 
 model.save(str(dist / "spheres.mlpackage"))

@@ -21,7 +21,7 @@ from .depth import Da2
 @dataclass(kw_only=True)
 class Config:  # hyperparameters
     # Raster
-    resolution: any = (392, 518)  # downsampling resolution (or None)
+    resolution: any = (392, 518)  # downsampling resolution
     subdivisions: any = 8  # minimum number of cells per dimension
     candidates: any = 16  # number of curves to trace
     rays: any = 64  # number of 2d points to fit
@@ -870,7 +870,9 @@ class Trace(namedtuple("Trace", ("points", "valid"))):  # masked 2d drop-offs
                 cols[:idx] + (atb,) + cols[idx + 1:], axis=2)
 
         det = jnp.linalg.det(ata)
-        det = jnp.where(jnp.abs(det) < 1e-10, 1e-10, det)
+        # TODO: I think compute graph precision is via MIL pass
+        eps = jnp.finfo(det.dtype).eps
+        det = jnp.where(jnp.abs(det) < eps, eps, det)
 
         a_, b_, c = (jnp.linalg.det(cramer(i)) / det for i in range(3))
         return a_ + mean[0], b_ + mean[1], jnp.sqrt(c + a_ ** 2 + b_ ** 2)
