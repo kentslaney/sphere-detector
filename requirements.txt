@@ -6,8 +6,8 @@ pillow_heif
 opencv-python
 torch
 torchvision
-# transformers @ git+https://github.com/pcuenca/transformers@dino-ane-patch
-transformers
+transformers @ git+https://github.com/pcuenca/transformers@dino-ane-patch
+# transformers
 # jax[cuda13]
 jax
 -e ./assets/stablehlo_coreml

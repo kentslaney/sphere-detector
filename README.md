@@ -19,5 +19,4 @@ python -m src.depth-test.export
 ```
 
 ## TODOs
-- `float16` inputs to avoid data format changes outside CoreML
 - Figure out a better repo name

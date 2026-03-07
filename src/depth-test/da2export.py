@@ -1,9 +1,11 @@
 # https://github.com/huggingface/coreml-examples/blob/main/tutorials/depth-anything-coreml-guide.ipynb
 
-from functools import cached_property
 import torch, torchvision
 import coremltools as ct
 import numpy as np
+
+from importlib.metadata import distribution
+from functools import cached_property
 
 from transformers import AutoModelForDepthEstimation
 from transformers import AutoImageProcessor
@@ -12,12 +14,12 @@ from coremltools.converters.mil import Builder as mb
 from coremltools.converters.mil import register_torch_op
 
 from .utils import Image, examples, dist
-from .cml import CmlConfig
+from .cml import config
 
 import logging
 logger = logging.getLogger(__name__)
 
-height, width = target = CmlConfig.resolution
+height, width = target = config.resolution
 
 class Da2:
     size_mapping = { 'vits': 'Small', 'vitb': 'Base', 'vitl': 'Large' }
@@ -40,7 +42,7 @@ class Da2:
         model = AutoModelForDepthEstimation.from_pretrained(self.model_repo)
         return model.eval()
 
-model = Da2('vits')
+model = Da2(config.depth_checkpoint)
 
 def load_image(path):
     image = Image.open(path)
@@ -81,7 +83,7 @@ class Wrapper(torch.nn.Module):
         self.model = model.model
         self.mean = [255 * x for x in model.mean]
         self.std = [255 * x for x in model.std]
-        self.flattened = CmlConfig.da2_precision == ct.precision.FLOAT32
+        self.flattened = config.da2_precision == ct.precision.FLOAT32
 
     @torch.no_grad()
     def forward(self, pixel_values):
@@ -107,14 +109,22 @@ with torch.no_grad():
 logger.info("preprocessing error", (out - baseline/baseline.max()).abs().max())
 
 input_types = [ct.ImageType(name="image", shape=example_inputs_coreml.shape)]
+patched_transformers = distribution("transformers").read_text("direct_url.json")
+ane_patch = patched_transformers and patched_transformers.endswith(
+        "github.com/pcuenca/transformers@dino-ane-patch")
+
+if patched_transformers and not ane_patch:
+    logger.warn("exporting for ANE with unknown transformers distribution")
+
 if to_trace.flattened:
+    if patched_transformers and ane_patch:
+        logger.error("exporting for GPU with transformers patched for ANE")
     compute_units = ct.ComputeUnit.CPU_AND_GPU
     output_types = [ct.TensorType(
         "depth", dtype=ct.converters.mil.mil.types.fp32)]
 else:
-    from importlib.metadata import distribution
-    if not distribution("transformers").read_text("direct_url.json"):
-        logger.warn(
+    if not patched_transformers:
+        logger.error(
                 "exporting for ANE with unpatched transformers distribution")
     compute_units = ct.ComputeUnit.ALL
     output_types = [ct.ImageType(
@@ -145,11 +155,11 @@ def upsample_bicubic2d(context, node):
 
 coreml_model = ct.convert(
     traced_model,
-    minimum_deployment_target = CmlConfig.opset_version,
+    minimum_deployment_target = config.opset_version,
     inputs = input_types,
     outputs = output_types,
     compute_units = compute_units,
-    compute_precision = CmlConfig.da2_precision,
+    compute_precision = config.da2_precision,
 )
 
 coreml_inputs = {"image": scaled_image}
@@ -161,7 +171,7 @@ assert output_array.shape == target
 baseline_np = (baseline / baseline.max()).numpy()[0]
 logger.info("conversion error", np.abs(output_array - baseline_np).max())
 
-model_precision = CmlConfig.da2_precision.name.replace("FLOAT", "F")
+model_precision = config.da2_precision.name.replace("FLOAT", "F")
 model_name = f"DepthAnythingV2{model.size}{model_precision}"
 coreml_model.name = model_name
 coreml_model.version = "2.0"

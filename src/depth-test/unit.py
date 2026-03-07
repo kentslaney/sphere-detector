@@ -11,19 +11,19 @@ from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 
 from .detect import Raster
 from .utils import dist
-from .cml import CmlConfig, convert
+from .cml import config, convert
 from .integration import im4_cml
 
-target = CmlConfig.resolution
+target = config.resolution
 
 @jax.jit
 def jax_density(x):
-    return Raster(None, x, resolution=target).opt().predict()
+    return Raster(None, x, resolution=config.resolution).opt().predict()
     return jax.tree_util.tree_flatten(
-            Raster(None, x, resolution=target).opt().points)[0]
+            Raster(None, x, resolution=config.resolution).opt().points)[0]
 
 context = jax_mlir.make_ir_context()
-input_shapes = (jnp.zeros(target, dtype=jnp.float32),)
+input_shapes = (jnp.zeros(config.input_shape, dtype=config.input_dtype),)
 jax_exported = export(jax_density)(*input_shapes)
 hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 
@@ -50,7 +50,7 @@ cml_model = ct.convert(
     compute_precision=ct.precision.FLOAT32,
     pass_pipeline=pipeline,
     inputs=[ct.TensorType(
-        mil_arg0, shape=target, dtype=ct.converters.mil.mil.types.fp32)],
+        mil_arg0, shape=config.resolution, dtype=config.input_cml_dtype)],
 )
 
 logger.setLevel(logger_level)

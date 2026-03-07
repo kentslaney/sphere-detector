@@ -9,10 +9,10 @@ from jax.export import export
 from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 
 from .utils import dist
-from .cml import CmlConfig, convert, jax_center_size_width_first
+from .cml import config, convert, jax_center_size_width_first
 
 context = jax_mlir.make_ir_context()
-input_shapes = (jnp.zeros(CmlConfig.resolution, dtype=jnp.float32),)
+input_shapes = (jnp.zeros(config.input_shape, dtype=config.input_dtype),)
 jax_exported = export(jax_center_size_width_first)(*input_shapes)
 hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 
@@ -36,13 +36,11 @@ logger.setLevel(logging.ERROR)
 cml_model = ct.convert(
     mil_program,
     source="milinternal",
-    minimum_deployment_target=CmlConfig.opset_version,
+    minimum_deployment_target=config.opset_version,
     compute_units=ct.ComputeUnit.CPU_AND_GPU,
     compute_precision=ct.precision.FLOAT32,
     pass_pipeline=pipeline,
-    inputs=[ct.TensorType(
-        mil_arg0, shape=CmlConfig.resolution,
-        dtype=ct.converters.mil.mil.types.fp32)],
+    inputs=[config.input_cml_type(mil_arg0)],
 )
 
 logger.setLevel(logger_level)
