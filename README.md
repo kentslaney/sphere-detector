@@ -1,4 +1,4 @@
-# Spheroid depth test
+# Sphere Detector (Depth Test)
 ## Install
 ```bash
 git submodule update --init
@@ -9,9 +9,9 @@ env/bin/pip install -r requirements.txt
 
 ## Snippets
 ```bash
-python -m src.depth-test
-python -m src.depth-test.demo
-python -m src.depth-test.export
+python -m src.sphere-detector
+python -m src.sphere-detector.demo
+python -m src.sphere-detector.export
 ```
 
 ```bash
@@ -19,4 +19,3 @@ python -m src.depth-test.export
 ```
 
 ## TODOs
-- Figure out a better repo name
