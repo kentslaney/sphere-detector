@@ -9,7 +9,7 @@ torchvision
 transformers @ git+https://github.com/pcuenca/transformers@dino-ane-patch
 # transformers
 # jax[cuda13]
-jax==0.9.0
+jax
 -e ./assets/stablehlo_coreml
 tqdm
 # development tools
