@@ -8,7 +8,7 @@ from functools import partial
 from stablehlo_coreml.converter import (
     StableHloConverter, register_optimizations
 )
-from stablehlo_coreml.utils import get_numpy_type
+from coremltools.converters.mil.mil import types
 from coremltools.converters.mil.mil import Builder as mb
 from jax._src.lib.mlir.dialects import hlo
 
@@ -78,6 +78,7 @@ def jax_center_size_width_first(x):
     coordinates /= jnp.tile(jnp.array(config.resolution[::-1]), [1, 2])
     return confidence.reshape((1, 1, -1)), coordinates.T.reshape((1, 4, -1))
 
+# TODO: switch to a StableHLO custom_call
 def convert(module, patch_tags=True, patch_output=False):
     register_optimizations()
     converter = UniqPatch if patch_output else TagPatcher
@@ -91,6 +92,7 @@ class RegisteredConverter(DefaultConverter):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self._stablehlo_ops_registry = DefaultConverter._stablehlo_ops_registry
+        self._composite_ops_registry = DefaultConverter._composite_ops_registry
 
     def default_dispatch(self, context, op):
         return DefaultConverter._dispatch_op(self, context, op)
@@ -151,11 +153,11 @@ class MilInjector(TagPatcher):
 
 class UniqPatch(MilInjector):
     def patch(self, confidence, coordinates):
-        iou_threshold = get_numpy_type(coordinates)(config.iou_threshold)
+        iou_type = types.nptype_from_builtin(coordinates.dtype)
         coordinates, confidence, _ = mb.non_maximum_suppression(
             boxes=coordinates,
             scores=confidence,
-            iou_threshold=mb.const(val=iou_threshold),
+            iou_threshold=mb.const(val=iou_type(config.iou_threshold)),
             max_boxes=confidence.shape[-1]
         )
         return confidence, coordinates
