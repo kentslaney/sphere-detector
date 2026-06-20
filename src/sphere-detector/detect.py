@@ -27,7 +27,7 @@ class Config:  # hyperparameters
     rays: any = 64  # number of 2d points to fit
     extent: any = 8  # minimum number of radii per diagonal
     # TODO: MIL integration test for early NMS (helps resolution invariance)
-    early_nms: any = True  # Seives.nms bypass switch
+    early_nms: any = False  # Seives.nms bypass switch
 
     # Bounds
     eps: any = 0.1  # density stabilization coefficient
