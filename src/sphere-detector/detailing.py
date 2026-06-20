@@ -29,7 +29,7 @@ model.output_description["confidence"] = (
 
 model.author = "Kent Slaney"
 model.license = "CC0"
-model.version = "0.3.1"
+model.version = "1.0.1"
 model.short_description = (
     "Looks for 3d curves, "
     "fits a circle to surrounding depth drop-offs, then "

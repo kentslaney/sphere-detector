@@ -27,7 +27,7 @@ class Config:  # hyperparameters
     rays: any = 64  # number of 2d points to fit
     extent: any = 8  # minimum number of radii per diagonal
     # TODO: MIL integration test for early NMS (helps resolution invariance)
-    early_nms: any = False  # Seives.nms bypass switch
+    early_nms: any = True  # Seives.nms bypass switch
 
     # Bounds
     eps: any = 0.1  # density stabilization coefficient
@@ -425,10 +425,9 @@ class Bins:  # wraps boundary tracking with stat tracking
             assert 0 <= m <= 2, f"padded {m}; more than expected"
             return jnp.full((x.shape[:i] + (n * m,) + x.shape[i + 1:]), fill)
         for i, prefix in enumerate(self.bounds.offset):
-            x = jax.lax.cond(
-                    prefix == 1,
-                    lambda: jnp.concat((full(i, 1), x), axis=i),
-                    lambda: jnp.concat((x, full(i, 1)), axis=i))
+            x_prefix = jnp.concat((full(i, 1), x), axis=i)
+            x_postfix = jnp.concat((x, full(i, 1)), axis=i)
+            x = jnp.where(prefix == 1, x_prefix, x_postfix)
             x = jnp.concat(
                     (x, full(i, self.bounds.upscale[i] - x.shape[i] // n)),
                     axis=i)
@@ -545,26 +544,50 @@ class Seives:  # Feature Pyramid
                 mask = a(self.pyramids[level]) >= bound
                 mask = jnp.logical_and(mask, a(self.stack[level + 1].primaries))
                 out[i].append(kron_bool(mask, b))
-        reduced_1st = []
-        for ll, lh, hl, hh in out:
-            ll = jnp.concatenate((ll[1:, :], jnp.zeros((1, ll.shape[1]))), 0)
-            ll = jnp.concatenate((ll[:, 1:], jnp.zeros((ll.shape[0], 1))), 1)
+        ll_all = jnp.logical_or(
+            jnp.logical_or(out[0][0], out[1][0]),
+            jnp.logical_or(out[2][0], out[3][0]))
+        lh_all = jnp.logical_or(
+            jnp.logical_or(out[0][1], out[1][1]),
+            jnp.logical_or(out[2][1], out[3][1]))
+        hl_all = jnp.logical_or(
+            jnp.logical_or(out[0][2], out[1][2]),
+            jnp.logical_or(out[2][2], out[3][2]))
+        hh_all = jnp.logical_or(
+            jnp.logical_or(out[0][3], out[1][3]),
+            jnp.logical_or(out[2][3], out[3][3]))
 
-            lh = jnp.concatenate((lh[1:, :], jnp.zeros((1, lh.shape[1]))), 0)
-            lh = jnp.concatenate((jnp.zeros((lh.shape[0], 1)), lh[:, :-1]), 1)
+        ll = jnp.concatenate((
+            ll_all[1:, :],
+            jnp.zeros((1, ll_all.shape[1]), dtype=bool)), 0)
+        ll = jnp.concatenate((
+            ll[:, 1:],
+            jnp.zeros((ll.shape[0], 1), dtype=bool)), 1)
 
-            hl = jnp.concatenate((jnp.zeros((1, hl.shape[1])), hl[:-1, :]), 0)
-            hl = jnp.concatenate((hl[:, 1:], jnp.zeros((hl.shape[0], 1))), 1)
+        lh = jnp.concatenate((
+            lh_all[1:, :],
+            jnp.zeros((1, lh_all.shape[1]), dtype=bool)), 0)
+        lh = jnp.concatenate((
+            jnp.zeros((lh.shape[0], 1), dtype=bool),
+            lh[:, :-1]), 1)
 
-            hh = jnp.concatenate((jnp.zeros((1, hh.shape[1])), hh[:-1, :]), 0)
-            hh = jnp.concatenate((jnp.zeros((hh.shape[0], 1)), hh[:, :-1]), 1)
+        hl = jnp.concatenate((
+            jnp.zeros((1, hl_all.shape[1]), dtype=bool),
+            hl_all[:-1, :]), 0)
+        hl = jnp.concatenate((
+            hl[:, 1:],
+            jnp.zeros((hl.shape[0], 1), dtype=bool)), 1)
 
-            reduced_1st.append(jnp.logical_or(
-                jnp.logical_or(ll, hh),
-                jnp.logical_or(lh, hl)))
+        hh = jnp.concatenate((
+            jnp.zeros((1, hh_all.shape[1]), dtype=bool),
+            hh_all[:-1, :]), 0)
+        hh = jnp.concatenate((
+            jnp.zeros((hh.shape[0], 1), dtype=bool),
+            hh[:, :-1]), 1)
+
         reduced = jnp.logical_or(
-                jnp.logical_or(reduced_1st[0], reduced_1st[3]),
-                jnp.logical_or(reduced_1st[1], reduced_1st[2]))
+            jnp.logical_or(ll, hh),
+            jnp.logical_or(lh, hl))
         suppressions = self.stack[level + 1].unshift(reduced, 2)
         allowed = jnp.logical_not(suppressions)
         candidates = jnp.logical_and(self.stack[level].primaries, allowed)
