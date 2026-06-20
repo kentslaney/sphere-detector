@@ -19,3 +19,4 @@ python -m src.sphere-detector.export
 ```
 
 ## TODOs
+Move early NMS to uint8 to avoid size 2 strides with padding bits for bit tricks
