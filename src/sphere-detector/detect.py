@@ -21,13 +21,13 @@ from .depth import Da2
 @dataclass(kw_only=True)
 class Config:  # hyperparameters
     # Raster
-    resolution: any = (392, 518)  # downsampling resolution
+    resolution: any = (128, 128)  # downsampling resolution
     subdivisions: any = 8  # minimum number of cells per dimension
-    candidates: any = 16  # number of curves to trace
+    candidates: any = 8  # number of curves to trace
     rays: any = 64  # number of 2d points to fit
-    extent: any = 8  # minimum number of radii per diagonal
+    extent: any = 2  # minimum number of radii per diagonal
     # TODO: MIL integration test for early NMS (helps resolution invariance)
-    early_nms: any = False  # Seives.nms bypass switch
+    early_nms: any = True  # Seives.nms bypass switch
 
     # Bounds
     eps: any = 0.1  # density stabilization coefficient
