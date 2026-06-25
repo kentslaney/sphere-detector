@@ -3,7 +3,7 @@
 	url = https://github.com/DepthAnything/Depth-Anything-V2
 [submodule "assets/stablehlo_coreml"]
 	path = assets/stablehlo_coreml
-	url = git@github.com:kentslaney/stablehlo-coreml.git
+	url = https://github.com/kentslaney/stablehlo-coreml
 [submodule "assets/coremltools"]
 	path = assets/coremltools
-	url = git@github.com:kentslaney/coremltools
+	url = https://github.com/kentslaney/coremltools
