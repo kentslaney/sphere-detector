@@ -21,7 +21,7 @@ from .depth import Da2
 @dataclass(kw_only=True)
 class Config:  # hyperparameters
     # Raster
-    resolution: any = (128, 128)  # downsampling resolution
+    resolution: any = (392, 518)  # (r, c) downsampling resolution
     subdivisions: any = 8  # minimum number of cells per dimension
     candidates: any = 8  # number of curves to trace
     rays: any = 64  # number of 2d points to fit
