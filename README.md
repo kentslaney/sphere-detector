@@ -1,4 +1,8 @@
 # Sphere Detector (Depth Test)
+Not quite fast enough for real-time, full-resolution inference on an edge
+device, but good at localization. Bounding boxes are expected to cover occluded
+areas.
+
 ## Install
 The coremltools compilation needs conda and zsh, but is only needed for the
 Apple Silicon export pipeline. Otherwise, it can be skipped and removed from the
