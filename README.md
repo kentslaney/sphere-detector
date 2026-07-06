@@ -25,6 +25,10 @@ previewing the behavior for an iPhone camera. Exporting is currently for Apple
 Silicon deployment targets, but only depth data onwards is licensed under CC0,
 in order to comply with the submodules' licenses.
 
+With the demo in the foreground, use the G key to toggle real time bounding box
+estimation, space to capture the current frame and display visualizations, or Q
+to close either the current group of windows or the preview window.
+
 ```bash
 python -m src.sphere-detector
 python -m src.sphere-detector.demo
