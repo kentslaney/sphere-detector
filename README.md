@@ -44,4 +44,6 @@ python -m src.sphere-detector.export
 ```
 
 ## TODOs
-Move early NMS to uint1 in MIL and possibly uint16 in StableHLO
+- Verify behavior for a basketball net
+- Support for airless tennis balls (depth drop-off problems)
+- Move early NMS to uint1 in MIL and possibly uint16 in StableHLO

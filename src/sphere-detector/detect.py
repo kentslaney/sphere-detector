@@ -205,6 +205,7 @@ class Depth:  # JAX depth data entry point
     def centers(self):
         return self.coord - self.flat_radius_over_norm[..., None] * self.grad
 
+    # relatable to the curvature of the level curve
     @cached_property
     def radii(self):
         da2, db2 = self.rotated[..., 0, 0], self.rotated[..., 1, 1]
