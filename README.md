@@ -44,6 +44,9 @@ python -m src.sphere-detector.export
 ```
 
 ## TODOs
+- Interface internals for [tracking](https://github.com/kentslaney/h264events)
+  (starting as closed source, ideally a separate repo)
 - Verify behavior for a basketball net
+- Support for a ball in a pitcher's hand (outline problems for ray casts)
 - Support for airless tennis balls (depth drop-off problems)
 - Move early NMS to uint1 in MIL and possibly uint16 in StableHLO
