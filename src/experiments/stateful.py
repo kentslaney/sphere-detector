@@ -1,21 +1,26 @@
-import functools, inspect
+import jax, functools, inspect
 from collections import namedtuple
 from types import MethodType
+
+jax.tree_util.register_static(type(Ellipsis))
 
 class Context:
     scope = None
 
     def __init__(self, name, state):
         # TODO: jax.extend.core.Primitive; mb.read_state; mb.coreml_update_state
-        assert state is not Ellipsis, "externally managed storage unimplemented"
+        assert state is not Ellipsis or __class__.scope is not None, \
+                "externally managed storage unimplemented"
         self.closure = {} if state is None else state
         self.name = name
 
     def __enter__(self):
-        assert __class__.scope is None, "nesting unimplemented" # TODO
-        self.locked = set()
-        __class__.scope = self
-        return self
+        if __class__.scope is not None:
+            assert self.closure is Ellipsis # TODO
+        else:
+            self.locked = set()
+            __class__.scope = self
+            return self
 
     def __getitem__(self, key):
         return self.closure[key] if self.starting else \
@@ -38,7 +43,8 @@ class Context:
         return self.closure
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        __class__.scope = None
+        if self.closure is not Ellipsis:
+            __class__.scope = None
 
 def restores(**contained):
     def decorator(f):
@@ -101,9 +107,22 @@ class Decorator:
             state, args = bound.arguments.pop(self.argname), bound.args
         with Context(self.argname, state) as scope:
             result = self.f(*args, **bound.kwargs)
-            return (scope.serializable, result)
+            return result if scope is None else (scope.serializable, result)
 
 def implicit(argname):
     def decorator(f):
         return Decorator(f, argname)
+    if not isinstance(argname, str):
+        return Decorator(argname, "state")
+    return decorator
+
+def managed(arg):
+    def decorator(f):
+        @functools.wraps(f)
+        def wrapper(*a, **kw):
+            return f(*a, **kw)
+        return wrapper
+    if not isinstance(arg, str):
+        f, arg = arg, None
+        return decorator(f)
     return decorator
