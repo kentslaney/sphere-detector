@@ -83,6 +83,11 @@ class Decorator:
         params.insert(index, inspect.Parameter(self.argname, kind))
         self.__signature__ = sig.replace(parameters=params)
 
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        return MethodType(self, instance)
+
     def __call__(*args, **kwargs):
         self, args = args[0], args[1:]
         sig = self.__signature__
