@@ -24,7 +24,7 @@ class DepthInputMode:
 
 @dataclass
 class CmlConfig(Config):
-    resolution: any = (128, 128)
+    resolution: any = (126, 126)
     iou_threshold: any = 0.75
     opset_version: any = ct.target.iOS18
     da2_precision: any = ct.precision.FLOAT16
