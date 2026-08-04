@@ -1,4 +1,5 @@
-import jax, functools, inspect
+import jax, jax.extend.core
+import functools, inspect
 from collections import namedtuple
 from types import MethodType
 
@@ -42,8 +43,22 @@ class Context:
             return namedtuple(self.name, self.closure.keys())(**self.closure)
         return self.closure
 
+    def _asdict(self):
+        if self.starting:
+            return self.closure
+        return self.closure._asdict()
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.closure is not Ellipsis:
+            trace = jax.extend.core.find_top_trace(())
+            for k, v in self._asdict().items():
+                if isinstance(v, jax.core.Tracer):
+                    if v._trace != trace:
+                        src = v._trace.frame.debug_info.func_src_info
+                        raise NameError(
+                            f"implicit '{k}' type {v} was produced by a trace "
+                            f"missing '{self.name}' for {src}"
+                        )
             __class__.scope = None
 
 def restores(**contained):
