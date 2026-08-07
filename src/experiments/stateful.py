@@ -100,6 +100,8 @@ class Decorator:
         kind = inspect.Parameter.POSITIONAL_ONLY if (
             index < len(params) and
             params[index].kind == inspect.Parameter.POSITIONAL_ONLY
+        ) else inspect.Parameter.KEYWORD_ONLY if (
+            index > 0 and params[0].kind == inspect.Parameter.KEYWORD_ONLY
         ) else inspect.Parameter.POSITIONAL_OR_KEYWORD
         params.insert(index, inspect.Parameter(self.argname, kind))
         self.__signature__ = sig.replace(parameters=params)

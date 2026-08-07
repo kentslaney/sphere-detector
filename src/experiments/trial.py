@@ -33,5 +33,6 @@ state, output[1] = exported(state, 3)
 state, output[2] = model.exported(state, 2)
 state, output[3] = Model.exported(model, state, 3)
 state, output[4] = Model.exported(self=model, state=state, x=4)
+# TODO: @classmethod and @staticmethod
 
 print(jnp.asarray(output))
