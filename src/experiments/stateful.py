@@ -7,13 +7,37 @@ jax.tree_util.register_static(type(Ellipsis))
 
 class Context:
     scope = None
+    external = None
 
     def __init__(self, name, state):
-        # TODO: jax.extend.core.Primitive; mb.read_state; mb.coreml_update_state
-        assert state is not Ellipsis or __class__.scope is not None, \
-                "externally managed storage unimplemented"
+        # TODO: mb.read_state; mb.coreml_update_state
+        if state is Ellipsis and __class__.scope is None:
+            state, self.external = None, {}
+
         self.closure = {} if state is None else state
         self.name = name
+
+    def read(self, key):
+        from jax._src.interpreters import mlir
+
+        read = jax.extend.core.Primitive("stateful_intake")
+        read.multiple_results = False
+
+        @read.def_abstract_eval
+        def read_shapes():
+            return jax.typeof(self.external[key])
+
+        @functools.partial(mlir.register_lowering, read)
+        def _lowering(ctx):
+            ir_types = mlir.aval_to_ir_types(ctx.module_context, read_shapes())
+            return mlir.custom_call(
+                "ffi_read",
+                operands=[],
+                result_types=ir_types,
+                backend_config=key,
+            ).results
+
+        return read
 
     def __enter__(self):
         if __class__.scope is not None:
@@ -32,6 +56,12 @@ class Context:
             self.closure[key] = value
         else:
             self.closure = self.closure._replace(**{key: value})
+
+    def register(self, key, default):
+        if self.external is None:
+            return default
+        self.external[key] = default
+        return self.read(key).bind()
 
     @functools.cached_property
     def starting(self):
@@ -75,8 +105,8 @@ def restores(**contained):
                         "Multiple restores cause branching side-effects in JAX."
                     )
                 Context.scope.locked.add(k)
-                namespace[k] = contained[k] if Context.scope.starting else \
-                        Context.scope[k]
+                namespace[k] = Context.scope.register(k, contained[k]) \
+                        if Context.scope.starting else Context.scope[k]
             result = f(*a, **kw)
             for k in contained:
                 Context.scope[k] = namespace[k]
@@ -134,6 +164,7 @@ def implicit(argname):
     return decorator
 
 def managed(arg):
+    raise NotImplementedError()
     def decorator(f):
         @functools.wraps(f)
         def wrapper(*a, **kw):
