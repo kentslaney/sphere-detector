@@ -34,9 +34,9 @@ estimation, space to capture the current frame and display visualizations, or Q
 to close either the current group of windows or the preview window.
 
 ```bash
-python -m src.sphere-detector
-python -m src.sphere-detector.demo
-python -m src.sphere-detector.export
+python -m src.sphere_detector
+python -m src.sphere_detector.demo
+python -m src.sphere_detector.export
 ```
 
 ```bash
