@@ -4,11 +4,18 @@ from jax._src.interpreters import mlir as jax_mlir
 from jax import export
 
 import coremltools as ct
+from coremltools.converters.mil import Builder as mb
+
+from stablehlo_coreml.ops_register import register_stablehlo_op
 from stablehlo_coreml.converter import convert
-from stablehlo_coreml import DEFAULT_HLO_PIPELINE
+from stablehlo_coreml.translation_context import TranslationContext
+from stablehlo_coreml import DEFAULT_HLO_PIPELINE, register_optimizations
 
 import jax.numpy as jnp
 from .stateful import implicit, restores
+from ..sphere_detector.cml import MilInjector
+
+from jaxlib.mlir.dialects.stablehlo import CustomCallOp
 
 @restores(momentum1=jnp.ones(()))
 def block1(x):
@@ -38,7 +45,34 @@ hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 print()
 print(hlo_module)
 
-mil_program = convert(hlo_module, minimum_deployment_target=ct.target.iOS18)
+class StatefulIO(MilInjector):
+    @register_stablehlo_op
+    def op_custom_call(self, context: TranslationContext, op: CustomCallOp):
+        call_target = op.call_target_name.value
+        if call_target == "shape_assertion":
+            return
+
+        if call_target == "ffi_read":
+            key = op.attributes["backend_config"].value
+            # TODO: mb.read_state
+            # https://apple.github.io/coremltools/docs-guides/source/stateful-models.html#creating-a-stateful-model-in-mil
+            # https://github.com/kasper0406/stablehlo-coreml/blob/cc1fbbeea6150ff97940195c05c1722c0058aaad/stablehlo_coreml/converter.py#L166
+            # >>> help(type(mb.StateTensorSpec((1,), dtype=types.fp16)))
+            # >>> help(mb.placeholder)
+            # currently returns the state name's length
+            res = mb.const(val=float(len(key)))
+            context.add_result(op.result, res)
+
+    def patch(self, *a):
+        # TODO: mb.coreml_update_state
+        return a
+
+mil_program = StatefulIO(opset_version=ct.target.iOS18).convert(hlo_module)
+
+print(mil_program)
+exit(0)
+
+register_optimizations()
 cml_model = ct.convert(
     mil_program,
     source="milinternal",

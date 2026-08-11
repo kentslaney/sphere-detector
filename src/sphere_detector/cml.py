@@ -91,8 +91,10 @@ DefaultConverter = StableHloConverter
 class RegisteredConverter(DefaultConverter):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
-        self._stablehlo_ops_registry = DefaultConverter._stablehlo_ops_registry
-        self._composite_ops_registry = DefaultConverter._composite_ops_registry
+        for register in ['_stablehlo_ops_registry', '_composite_ops_registry']:
+            setattr(self, register, {
+                **getattr(DefaultConverter, register),
+                **getattr(self, register, {})})
 
     def default_dispatch(self, context, op):
         return DefaultConverter._dispatch_op(self, context, op)

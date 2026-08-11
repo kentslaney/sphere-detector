@@ -10,7 +10,6 @@ class Context:
     external = None
 
     def __init__(self, name, state):
-        # TODO: mb.read_state; mb.coreml_update_state
         if state is Ellipsis and __class__.scope is None:
             state, self.external = None, {}
 
