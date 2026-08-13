@@ -58,7 +58,6 @@ class Context:
         else:
             self.closure = self.closure._replace(**{key: value})
 
-    # TODO: use the defaults
     def register(self, key, default):
         assert self.external is not Ellipsis
         if self.external is not None:
@@ -113,7 +112,7 @@ def restores(**contained):
                         if Context.scope.starting else Context.scope[k]
             result = f(*a, **kw)
             for k in contained:
-                Context.scope[k] = namespace[k]
+                Context.scope[k] = namespace[k].astype(contained[k].dtype)
                 del namespace[k]
             return result
         return wrapper
@@ -158,6 +157,8 @@ class Decorator:
             state, args = bound.arguments.pop(self.argname), bound.args
         with Context(self.argname, state) as scope:
             result = self.f(*args, **bound.kwargs)
+            if isinstance(scope.external, dict):
+                self.defaults = scope.external
             return result if scope is None else (scope.serializable, result)
 
 def implicit(argname):
@@ -168,7 +169,7 @@ def implicit(argname):
     return decorator
 
 def managed(arg):
-    raise NotImplementedError()
+    raise NotImplementedError() # TODO
     def decorator(f):
         @functools.wraps(f)
         def wrapper(*a, **kw):

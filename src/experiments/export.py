@@ -17,13 +17,13 @@ from ..sphere_detector.cml import MilInjector
 
 from jaxlib.mlir.dialects.stablehlo import CustomCallOp
 
-@restores(momentum1=jnp.ones(()))
+@restores(momentum1=jnp.ones((), dtype=jnp.float16))
 def block1(x):
     global momentum1
     momentum1 += x
     return x + momentum1
 
-@restores(momentum2=jnp.zeros(()))
+@restores(momentum2=jnp.zeros((), dtype=jnp.float16))
 def block2(x):
     global momentum2
     momentum2 += x
@@ -35,11 +35,12 @@ def exported(x):
 
 context = jax_mlir.make_ir_context()
 input_shapes = (jnp.zeros(()),)
+state_shape = exported(..., *input_shapes)[0]
 jax_exported = export.export(
     jax.jit(exported, donate_argnames=["state"]), disabled_checks=[
         export.DisabledSafetyCheck.custom_call("ffi_read")
     ]
-)(exported(..., *input_shapes)[0], *input_shapes)
+)(state_shape, *input_shapes)
 hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 
 print()
@@ -49,6 +50,7 @@ class StatefulIO(MilInjector):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.internal_io = {}
+        self.external_io = {}
 
     @register_stablehlo_op
     def op_custom_call(self, context: TranslationContext, op: CustomCallOp):
@@ -61,9 +63,10 @@ class StatefulIO(MilInjector):
             mapping = int(attrs['tf.aliasing_output'])
             assert placeholder.arg_number == mapping
             key = op.attributes["backend_config"].value
-            state = context[placeholder.get_name()]
-            state.set_name(key)
+            arg = placeholder.get_name()
+            state = context[arg]
             self.internal_io[mapping] = state
+            self.external_io[key] = arg
             context.add_result(op.result, mb.read_state(input=state))
         else:
             return super().op_custom_call(context, op)
@@ -73,10 +76,11 @@ class StatefulIO(MilInjector):
             mb.coreml_update_state(state=v, value=a[k])
         return [x for i, x in enumerate(a) if i not in self.internal_io]
 
-mil_program = StatefulIO(opset_version=ct.target.iOS18).convert(hlo_module)
+converter = StatefulIO(opset_version=ct.target.iOS18)
+mil_program = converter.convert(hlo_module)
 
 print(mil_program)
-exit(0)
+print(converter.external_io, exported.defaults, end="\n\n")
 
 register_optimizations()
 cml_model = ct.convert(
@@ -85,3 +89,5 @@ cml_model = ct.convert(
     minimum_deployment_target=ct.target.iOS18,
     pass_pipeline=DEFAULT_HLO_PIPELINE,
 )
+
+print(cml_model)
