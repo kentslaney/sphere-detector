@@ -46,22 +46,32 @@ print()
 print(hlo_module)
 
 class StatefulIO(MilInjector):
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.internal_io = {}
+
     @register_stablehlo_op
     def op_custom_call(self, context: TranslationContext, op: CustomCallOp):
         call_target = op.call_target_name.value
-        if call_target == "shape_assertion":
-            return
-
         if call_target == "ffi_read":
+            placeholder = op.inputs[0]
+            hlo_func = placeholder.owner.owner
+            with hlo_func.context:
+                attrs = hlo_func.arg_attrs[placeholder.arg_number]
+            mapping = int(attrs['tf.aliasing_output'])
+            assert placeholder.arg_number == mapping
             key = op.attributes["backend_config"].value
-            # TODO: mb.read_state
-            # currently returns the state name's length
-            res = mb.const(val=float(len(key)))
-            context.add_result(op.result, res)
+            state = context[placeholder.get_name()]
+            state.set_name(key)
+            self.internal_io[mapping] = state
+            context.add_result(op.result, mb.read_state(input=state))
+        else:
+            return super().op_custom_call(context, op)
 
     def patch(self, *a):
-        # TODO: mb.coreml_update_state
-        return a
+        for k, v in self.internal_io.items():
+            mb.coreml_update_state(state=v, value=a[k])
+        return [x for i, x in enumerate(a) if i not in self.internal_io]
 
 mil_program = StatefulIO(opset_version=ct.target.iOS18).convert(hlo_module)
 

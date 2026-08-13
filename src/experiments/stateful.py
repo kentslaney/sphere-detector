@@ -58,6 +58,7 @@ class Context:
         else:
             self.closure = self.closure._replace(**{key: value})
 
+    # TODO: use the defaults
     def register(self, key, default):
         assert self.external is not Ellipsis
         if self.external is not None:
