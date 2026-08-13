@@ -10,28 +10,28 @@ class Context:
     external = None
 
     def __init__(self, name, state):
+        assert name != "ffi"
         if state is Ellipsis and __class__.scope is None:
             state, self.external = None, {}
+        if type(state).__name__ == "ffi":
+            self.external = ...
 
         self.closure = {} if state is None else state
         self.name = name
 
-    def read(self, key):
+    def read(self, key, shape):
         from jax._src.interpreters import mlir
 
         read = jax.extend.core.Primitive("stateful_intake")
         read.multiple_results = False
-
-        @read.def_abstract_eval
-        def read_shapes():
-            return jax.typeof(self.external[key])
+        read.def_abstract_eval(lambda _: shape)
 
         @functools.partial(mlir.register_lowering, read)
-        def _lowering(ctx):
-            ir_types = mlir.aval_to_ir_types(ctx.module_context, read_shapes())
+        def _lowering(ctx, ref):
+            ir_types = mlir.aval_to_ir_types(ctx.module_context, shape)
             return mlir.custom_call(
                 "ffi_read",
-                operands=[],
+                operands=[ref],
                 result_types=ir_types,
                 backend_config=key,
             ).results
@@ -47,8 +47,10 @@ class Context:
             return self
 
     def __getitem__(self, key):
-        return self.closure[key] if self.starting else \
-                getattr(self.closure, key)
+        res = self.closure[key] if self.starting else getattr(self.closure, key)
+        if self.external is not Ellipsis:
+            return res
+        return self.read(key, jax.typeof(res)).bind(res)
 
     def __setitem__(self, key, value):
         if self.starting:
@@ -57,10 +59,10 @@ class Context:
             self.closure = self.closure._replace(**{key: value})
 
     def register(self, key, default):
-        if self.external is None:
-            return default
-        self.external[key] = default
-        return self.read(key).bind()
+        assert self.external is not Ellipsis
+        if self.external is not None:
+            self.external[key] = default
+        return default
 
     @functools.cached_property
     def starting(self):
@@ -69,7 +71,9 @@ class Context:
     @property
     def serializable(self):
         if self.starting:
-            return namedtuple(self.name, self.closure.keys())(**self.closure)
+            return namedtuple(
+                    self.name if self.external is None else "ffi",
+                    self.closure.keys())(**self.closure)
         return self.closure
 
     def _asdict(self):

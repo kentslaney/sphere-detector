@@ -36,10 +36,10 @@ def exported(x):
 context = jax_mlir.make_ir_context()
 input_shapes = (jnp.zeros(()),)
 jax_exported = export.export(
-    jax.jit(exported), disabled_checks=[
+    jax.jit(exported, donate_argnames=["state"]), disabled_checks=[
         export.DisabledSafetyCheck.custom_call("ffi_read")
     ]
-)(..., *input_shapes)
+)(exported(..., *input_shapes)[0], *input_shapes)
 hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 
 print()
@@ -55,10 +55,6 @@ class StatefulIO(MilInjector):
         if call_target == "ffi_read":
             key = op.attributes["backend_config"].value
             # TODO: mb.read_state
-            # https://apple.github.io/coremltools/docs-guides/source/stateful-models.html#creating-a-stateful-model-in-mil
-            # https://github.com/kasper0406/stablehlo-coreml/blob/cc1fbbeea6150ff97940195c05c1722c0058aaad/stablehlo_coreml/converter.py#L166
-            # >>> help(type(mb.StateTensorSpec((1,), dtype=types.fp16)))
-            # >>> help(mb.placeholder)
             # currently returns the state name's length
             res = mb.const(val=float(len(key)))
             context.add_result(op.result, res)
