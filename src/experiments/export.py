@@ -85,6 +85,8 @@ print(mil_program)
 # TODO: rename StableHLO-generated arguments
 # TODO: StateType doesn't support a default value
 # PyTorch's register_buffer initialization is ignored and make_state gives zeros
+# add/subtract on read/write and warn on non-zero offset to consider using
+#   write_state
 print(converter.external_io, exported.defaults, end="\n\n")
 
 register_optimizations()
