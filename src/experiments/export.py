@@ -46,6 +46,8 @@ hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 print()
 print(hlo_module)
 
+# TODO: support for multiple functions (process_block hook breaks and fn names)
+
 class StatefulIO(MilInjector):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
@@ -80,6 +82,9 @@ converter = StatefulIO(opset_version=ct.target.iOS18)
 mil_program = converter.convert(hlo_module)
 
 print(mil_program)
+# TODO: rename StableHLO-generated arguments
+# TODO: StateType doesn't support a default value
+# PyTorch's register_buffer initialization is ignored and make_state gives zeros
 print(converter.external_io, exported.defaults, end="\n\n")
 
 register_optimizations()
