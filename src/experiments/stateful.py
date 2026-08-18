@@ -39,12 +39,13 @@ class Context:
         return read
 
     def __enter__(self):
+        self.parent = __class__.scope
         if __class__.scope is not None:
-            assert self.closure is Ellipsis # TODO
+            self.locked = __class__.scope.locked
         else:
             self.locked = set()
-            __class__.scope = self
-            return self
+        __class__.scope = self
+        return self
 
     def __getitem__(self, key):
         res = self.closure[key] if self.starting else getattr(self.closure, key)
@@ -56,7 +57,12 @@ class Context:
         if self.starting:
             self.closure[key] = value
         else:
-            self.closure = self.closure._replace(**{key: value})
+            if hasattr(self.closure, "_fields") and key not in self.closure._fields:
+                d = self.closure._asdict()
+                d[key] = value
+                self.closure = namedtuple(type(self.closure).__name__, d.keys())(**d)
+            else:
+                self.closure = self.closure._replace(**{key: value})
 
     def register(self, key, default):
         assert self.external is not Ellipsis
@@ -92,7 +98,7 @@ class Context:
                             f"implicit '{k}' type {v} was produced by a trace "
                             f"missing '{self.name}' for {src}"
                         )
-            __class__.scope = None
+        __class__.scope = self.parent
 
 def restores(**contained):
     def decorator(f):
@@ -108,8 +114,9 @@ def restores(**contained):
                         "Multiple restores cause branching side-effects in JAX."
                     )
                 Context.scope.locked.add(k)
+                is_missing = not Context.scope.starting and not hasattr(Context.scope.closure, k)
                 namespace[k] = Context.scope.register(k, contained[k]) \
-                        if Context.scope.starting else Context.scope[k]
+                        if (Context.scope.starting or is_missing) else Context.scope[k]
             result = f(*a, **kw)
             for k in contained:
                 Context.scope[k] = namespace[k].astype(contained[k].dtype)
@@ -168,14 +175,98 @@ def implicit(argname):
         return Decorator(argname, "state")
     return decorator
 
-def managed(arg):
-    raise NotImplementedError() # TODO
+def managed(arg=None):
+    branch = arg if isinstance(arg, str) else None
+
     def decorator(f):
         @functools.wraps(f)
         def wrapper(*a, **kw):
-            return f(*a, **kw)
+            is_delegated = (
+                (len(a) > 0 and a[0] is Ellipsis) or
+                (kw.get("state") is Ellipsis)
+            )
+            if not is_delegated:
+                return f(*a, **kw)
+
+            scope = Context.scope
+            if scope is None:
+                return f(*a, **kw)
+
+            if branch is not None:
+                if scope.starting:
+                    sub_state = scope.closure.get(branch, None)
+                    if sub_state is None and scope.external is not None:
+                        sub_state = ... if scope.external is ... else None
+                else:
+                    sub_state = getattr(scope.closure, branch, None)
+            else:
+                if scope.starting:
+                    sub_state = ... if scope.external is ... else (scope.closure if scope.closure else None)
+                else:
+                    sub_state = scope.closure
+
+            if len(a) > 0 and a[0] is Ellipsis:
+                new_a = (sub_state,) + a[1:]
+                new_kw = kw
+            else:
+                new_a = a
+                new_kw = dict(kw)
+                new_kw["state"] = sub_state
+
+            out = f(*new_a, **new_kw)
+
+            if isinstance(out, tuple) and len(out) == 2:
+                new_sub_state, result = out
+            else:
+                return out
+
+            if branch is not None:
+                if scope.starting:
+                    scope.closure[branch] = new_sub_state
+                    if isinstance(scope.external, dict):
+                        sub_defaults = getattr(f, "defaults", None)
+                        if sub_defaults is not None:
+                            scope.external[branch] = sub_defaults
+                        elif hasattr(new_sub_state, "_asdict"):
+                            scope.external[branch] = new_sub_state._asdict()
+                        elif isinstance(new_sub_state, dict):
+                            scope.external[branch] = new_sub_state
+                else:
+                    if hasattr(scope.closure, "_fields") and branch not in scope.closure._fields:
+                        d = scope.closure._asdict()
+                        d[branch] = new_sub_state
+                        scope.closure = namedtuple(type(scope.closure).__name__, d.keys())(**d)
+                    else:
+                        scope.closure = scope.closure._replace(**{branch: new_sub_state})
+            else:
+                if scope.starting:
+                    if hasattr(new_sub_state, "_asdict"):
+                        scope.closure.update(new_sub_state._asdict())
+                    elif isinstance(new_sub_state, dict):
+                        scope.closure.update(new_sub_state)
+                    if isinstance(scope.external, dict):
+                        sub_defaults = getattr(f, "defaults", None)
+                        if isinstance(sub_defaults, dict):
+                            scope.external.update(sub_defaults)
+                        elif hasattr(new_sub_state, "_asdict"):
+                            scope.external.update(new_sub_state._asdict())
+                        elif isinstance(new_sub_state, dict):
+                            scope.external.update(new_sub_state)
+                else:
+                    items = new_sub_state._asdict() if hasattr(new_sub_state, "_asdict") else new_sub_state
+                    if hasattr(scope.closure, "_fields"):
+                        d = scope.closure._asdict()
+                        d.update(items)
+                        scope.closure = namedtuple(type(scope.closure).__name__, d.keys())(**d)
+                    else:
+                        scope.closure = scope.closure._replace(**items)
+
+            return result
+
         return wrapper
-    if not isinstance(arg, str):
-        f, arg = arg, None
+
+    if not isinstance(arg, str) and arg is not None:
+        f = arg
+        branch = None
         return decorator(f)
     return decorator
