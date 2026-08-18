@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 
+momentum: jax.Array
+
 @restores(momentum=jnp.ones(()))
 def block(x):
     global momentum
