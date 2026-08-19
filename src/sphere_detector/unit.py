@@ -1,61 +1,83 @@
-import jax, json
+import unittest
+import pickle
+import numpy as np
 import jax.numpy as jnp
 import coremltools as ct
-import numpy as np
-
 from jax._src.lib.mlir import ir
 from jax._src.interpreters import mlir as jax_mlir
 from jax.export import export
-
 from stablehlo_coreml import DEFAULT_HLO_PIPELINE
 
 from .detect import Raster
-from .cml import config, convert
+from .cml import config, config_kw, convert, jax_center_size_width_first
 from .integration import im4_cml
+from .utils import assets
 
-target = config.resolution
 
-@jax.jit
-def jax_density(x):
-    return Raster(None, x, resolution=config.resolution).opt().predict()
-    return jax.tree_util.tree_flatten(
-            Raster(None, x, resolution=config.resolution).opt().points)[0]
+class TestNmsPipeline(unittest.TestCase):
 
-context = jax_mlir.make_ir_context()
-input_shapes = (jnp.zeros(config.input_shape, dtype=config.input_dtype),)
-jax_exported = export(jax_density)(*input_shapes)
-hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
+    def setUp(self):
+        self.golden_path = assets / "nms_golden.pkl"
+        if not self.golden_path.exists():
+            self.skipTest(f"Golden dataset {self.golden_path} not found")
+        with open(self.golden_path, "rb") as f:
+            self.golden = pickle.load(f)
+        self.depth = self.golden["depth"]
+        self.raster = Raster(None, self.depth, **config_kw)
+        self.seives = self.raster.seives
 
-mil_program = convert(hlo_module)
+    def test_nms_golden_levels(self):
+        """Verify NMS outputs bit-for-bit against golden reference."""
+        for level in range(len(self.seives.stack) - 1, 0, -1):
+            with self.subTest(level=level):
+                nms_out = np.array(self.seives.nms(level))
+                expected = self.golden["nms_outputs"][level]
+                np.testing.assert_array_equal(nms_out, expected)
 
-mil_args = mil_program.functions[
-        mil_program.default_function_name].inputs.keys()
-mil_arg0 = next(iter(mil_args))
+    def test_nominate_golden(self):
+        """Verify candidate nomination top-K against golden reference."""
+        vals, idxs = self.seives.nominate(config.candidates)
+        np.testing.assert_array_equal(
+            np.array(idxs), self.golden["nominate_indices"])
+        np.testing.assert_allclose(
+            np.array(vals), self.golden["nominate_values"], rtol=1e-5, atol=1e-6)
 
-pipeline = DEFAULT_HLO_PIPELINE
-pipeline.set_options("common::const_elimination", {"skip_const_by_size": "1e2"})
+    def test_export_pipeline_conversion(self):
+        """Verify JAX export and CoreML MIL conversion and prediction."""
+        context = jax_mlir.make_ir_context()
+        input_shapes = (jnp.zeros(config.input_shape, dtype=config.input_dtype),)
+        jax_exported = export(jax_center_size_width_first)(*input_shapes)
+        hlo_module = ir.Module.parse(jax_exported.mlir_module(), context=context)
 
-import logging
-from coremltools import _logger as logger
-logger_level = logger.level
-logger.setLevel(logging.ERROR)
+        mil_program = convert(hlo_module, patch_tags=True, patch_output=True)
+        mil_args = mil_program.functions[
+            mil_program.default_function_name].inputs.keys()
+        mil_arg0 = next(iter(mil_args))
 
-cml_model = ct.convert(
-    mil_program,
-    source="milinternal",
-    minimum_deployment_target=ct.target.iOS18,
-    # compute_units=ct.ComputeUnit.ALL,
-    compute_units=ct.ComputeUnit.CPU_ONLY,
-    compute_precision=ct.precision.FLOAT32,
-    pass_pipeline=pipeline,
-    inputs=[ct.TensorType(
-        mil_arg0, shape=config.resolution, dtype=config.input_cml_dtype)],
-)
+        pipeline = DEFAULT_HLO_PIPELINE
+        pipeline.set_options(
+            "common::const_elimination", {"skip_const_by_size": "1e2"})
 
-logger.setLevel(logger_level)
+        cml_model = ct.convert(
+            mil_program,
+            source="milinternal",
+            minimum_deployment_target=ct.target.iOS18,
+            compute_units=ct.ComputeUnit.CPU_ONLY,
+            compute_precision=ct.precision.FLOAT32,
+            pass_pipeline=pipeline,
+            inputs=[ct.TensorType(
+                mil_arg0, shape=config.input_shape, dtype=config.input_cml_dtype)],
+        )
 
-cml_out = cml_model.predict({"_arg0": np.array(im4_cml.depth.depth)})
-jax_out = jax_density(im4_cml.depth.depth)
-fmt_kw = {"sep": "\n", "end": "\n\n"}
-print("CoreML", *[cml_out[k] for k in cml_model.output_description], **fmt_kw)
-print("Jax", *jax_out, **fmt_kw)
+        input_names = [f.name for f in cml_model.get_spec().description.input]
+        depth_in = np.array(im4_cml.depth.depth).reshape(config.input_shape)
+        cml_out = cml_model.predict({input_names[0]: depth_in})
+        jax_out = jax_center_size_width_first(depth_in)
+
+        self.assertIsNotNone(cml_out)
+        self.assertEqual(len(cml_out), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
+

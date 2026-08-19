@@ -8,7 +8,9 @@ import jax.numpy as jnp
 from jax.scipy.signal import correlate2d
 from jax.scipy.optimize import minimize
 
-from .utils import lazy_default, jax_limit_cache, kron_bool, patch_tag, Image
+from .utils import (
+    lazy_default, jax_limit_cache, kron_bool, unpack_u16_4x4, shift_grid,
+    patch_tag, Image)
 from .depth import Da2
 
 @partial(
@@ -499,6 +501,7 @@ class Seives:  # Feature Pyramid
         return tuple(out[::-1])
 
     @jax.jit(static_argnames=["level"])
+    @patch_tag("early_nms")
     def nms(self, level):
         if not self.config.early_nms:
             return True
@@ -517,12 +520,6 @@ class Seives:  # Feature Pyramid
             [0x0888, 0x8880, 0x0111, 0x1110],
             [0x7000, 0x0007, 0xe000, 0x000e],
             [0x0117, 0x7110, 0x088e, 0xe880]]
-        # Convert hex masks into actual 4x4 boolean JAX arrays
-        kernels = [[
-            jnp.array([[
-                bool(((j >> (n * 4)) & 0xF) & (1 << m))
-                for n in range(3, -1, -1)] for m in range(3, -1, -1)])
-            for j in i] for i in kernel_masks]
         # Slicing functions to extract 4 subgrids (even/odd rows/cols) for a 2x2 stride
         strides = [
                 (lambda *a: (lambda x: jax.lax.slice(x, a, x.shape, (2, 2))))(
@@ -530,8 +527,9 @@ class Seives:  # Feature Pyramid
         masks = [None] * 3
         out = ([], [], [], [])
         # Apply the base suppression kernels (group 3) unconditionally
-        for a, b in zip(strides, kernels[3]):
-            out[3].append(kron_bool(a(self.stack[level + 1].primaries), b))
+        for a, k_val in zip(strides, kernel_masks[3]):
+            subgrid = a(self.stack[level + 1].primaries)
+            out[3].append(jnp.where(subgrid, jnp.uint16(k_val), jnp.uint16(0)))
         # Compute masks based on the "ruler" function to determine common ancestor distance
         mask1lo   = self.ruler_0th[0][level][:, None]
         mask1hi   = self.ruler_0th[1][level][:, None]
@@ -546,62 +544,41 @@ class Seives:  # Feature Pyramid
                 (self.ruler_0th[1][level], self.ruler_1st[1][level])]
         masks[0] = [jax.lax.max(*jnp.meshgrid(x, y)) for y, x in mask0prod]
         # Apply the conditional suppression kernels (groups 0-2) using the computed ancestor masks
-        for i, (mask, kernel) in enumerate(zip(masks, kernels[:3])):
-            for bound, a, b in zip(mask, strides, kernel):
+        for i in range(3):
+            for bound, a, k_val in zip(masks[i], strides, kernel_masks[i]):
                 mask = a(self.pyramids[level]) >= bound
                 mask = jnp.logical_and(mask, a(self.stack[level + 1].primaries))
-                out[i].append(kron_bool(mask, b))
-        # Aggregate suppression masks from all kernel groups
-        ll_all = jnp.logical_or(
-            jnp.logical_or(out[0][0], out[1][0]),
-            jnp.logical_or(out[2][0], out[3][0]))
-        lh_all = jnp.logical_or(
-            jnp.logical_or(out[0][1], out[1][1]),
-            jnp.logical_or(out[2][1], out[3][1]))
-        hl_all = jnp.logical_or(
-            jnp.logical_or(out[0][2], out[1][2]),
-            jnp.logical_or(out[2][2], out[3][2]))
-        hh_all = jnp.logical_or(
-            jnp.logical_or(out[0][3], out[1][3]),
-            jnp.logical_or(out[2][3], out[3][3]))
+                out[i].append(jnp.where(mask, jnp.uint16(k_val), jnp.uint16(0)))
+        # Aggregate suppression masks from all kernel groups in uint16 (exact disjoint bit sets)
+        ll_u16 = out[0][0] + out[1][0] + out[2][0] + out[3][0]
+        lh_u16 = out[0][1] + out[1][1] + out[2][1] + out[3][1]
+        hl_u16 = out[0][2] + out[1][2] + out[2][2] + out[3][2]
+        hh_u16 = out[0][3] + out[1][3] + out[2][3] + out[3][3]
 
-        # Apply spatial shifts to the aggregated masks so that suppressors align with target candidates
-        # Shift bottom-right (-1, -1)
-        ll = jnp.concatenate((
-            ll_all[1:, :],
-            jnp.zeros((1, ll_all.shape[1]), dtype=bool)), 0)
-        ll = jnp.concatenate((
-            ll[:, 1:],
-            jnp.zeros((ll.shape[0], 1), dtype=bool)), 1)
+        # Apply spatial shifts directly in packed word space
+        ll = ((ll_u16 & jnp.uint16(0x0777)) << 5) + \
+             ((shift_grid(ll_u16, 0, -1) & jnp.uint16(0x7000)) >> 11) + \
+             ((shift_grid(ll_u16, -1, 0) & jnp.uint16(0x0888)) << 1) + \
+             ((shift_grid(ll_u16, -1, -1) & jnp.uint16(0x8000)) >> 15)
 
-        # Shift bottom-left (-1, +1)
-        lh = jnp.concatenate((
-            lh_all[1:, :],
-            jnp.zeros((1, lh_all.shape[1]), dtype=bool)), 0)
-        lh = jnp.concatenate((
-            jnp.zeros((lh.shape[0], 1), dtype=bool),
-            lh[:, :-1]), 1)
+        lh = ((shift_grid(lh_u16, 0, 1) & jnp.uint16(0x0007)) << 13) + \
+             ((lh_u16 & jnp.uint16(0x7770)) >> 3) + \
+             ((shift_grid(lh_u16, -1, 1) & jnp.uint16(0x0008)) << 9) + \
+             ((shift_grid(lh_u16, -1, 0) & jnp.uint16(0x8880)) >> 7)
 
-        # Shift top-right (+1, -1)
-        hl = jnp.concatenate((
-            jnp.zeros((1, hl_all.shape[1]), dtype=bool),
-            hl_all[:-1, :]), 0)
-        hl = jnp.concatenate((
-            hl[:, 1:],
-            jnp.zeros((hl.shape[0], 1), dtype=bool)), 1)
+        hl = ((shift_grid(hl_u16, 1, 0) & jnp.uint16(0x0111)) << 7) + \
+             ((shift_grid(hl_u16, 1, -1) & jnp.uint16(0x1000)) >> 9) + \
+             ((hl_u16 & jnp.uint16(0x0EEE)) << 3) + \
+             ((shift_grid(hl_u16, 0, -1) & jnp.uint16(0xE000)) >> 13)
 
-        # Shift top-left (+1, +1)
-        hh = jnp.concatenate((
-            jnp.zeros((1, hh_all.shape[1]), dtype=bool),
-            hh_all[:-1, :]), 0)
-        hh = jnp.concatenate((
-            jnp.zeros((hh.shape[0], 1), dtype=bool),
-            hh[:, :-1]), 1)
+        hh = ((shift_grid(hh_u16, 1, 1) & jnp.uint16(0x0001)) << 15) + \
+             ((shift_grid(hh_u16, 1, 0) & jnp.uint16(0x1110)) >> 1) + \
+             ((shift_grid(hh_u16, 0, 1) & jnp.uint16(0x000E)) << 11) + \
+             ((hh_u16 & jnp.uint16(0xEEE0)) >> 5)
 
-        # Combine shifted suppression masks and apply to the candidates
-        reduced = jnp.logical_or(
-            jnp.logical_or(ll, hh),
-            jnp.logical_or(lh, hl))
+        # Combine all 4 shifted phases in packed word space and unpack once per layer
+        reduced_u16 = (ll | hh) | (lh | hl)
+        reduced = unpack_u16_4x4(reduced_u16)
         suppressions = self.stack[level + 1].unshift(reduced, 2)
         allowed = jnp.logical_not(suppressions)
         candidates = jnp.logical_and(self.stack[level].primaries, allowed)

@@ -8,7 +8,8 @@ from pillow_heif import register_heif_opener
 register_heif_opener()
 
 local = pathlib.Path(__file__).parents[2]
-examples = local / "assets" / "examples"
+assets = local / "assets"
+examples = assets / "examples"
 
 dist = local / "dist"
 dist.mkdir(parents=True, exist_ok=True)
@@ -64,6 +65,26 @@ def kron_bool(a, b):
     return jnp.reshape(
         jnp.logical_and(a[:, None, :, None], b[None, :, None, :]),
         (a.shape[0] * b.shape[0], a.shape[1] * b.shape[1]))
+
+_U16_DIVISORS_4X4 = jnp.array(
+    [[1 << ((3 - c) * 4 + (3 - r)) for c in range(4)] for r in range(4)],
+    dtype=jnp.uint16)
+
+def unpack_u16_4x4(u16_grid):
+    bits = (u16_grid[:, None, :, None] // _U16_DIVISORS_4X4[None, :, None, :]) % 2
+    return (bits != 0).reshape(u16_grid.shape[0] * 4, u16_grid.shape[1] * 4)
+
+def shift_grid(u, dr, dc):
+    h, w = u.shape
+    if dr == -1:
+        u = jnp.concatenate((u[1:, :], jnp.zeros((1, w), dtype=u.dtype)), axis=0)
+    elif dr == 1:
+        u = jnp.concatenate((jnp.zeros((1, w), dtype=u.dtype), u[:-1, :]), axis=0)
+    if dc == -1:
+        u = jnp.concatenate((u[:, 1:], jnp.zeros((h, 1), dtype=u.dtype)), axis=1)
+    elif dc == 1:
+        u = jnp.concatenate((jnp.zeros((h, 1), dtype=u.dtype), u[:, :-1]), axis=1)
+    return u
 
 
 patch_label = "patch_tag_runtime_callsite"
