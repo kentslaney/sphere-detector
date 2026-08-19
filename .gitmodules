@@ -4,6 +4,3 @@
 [submodule "assets/stablehlo_coreml"]
 	path = assets/stablehlo_coreml
 	url = https://github.com/kentslaney/stablehlo-coreml
-[submodule "assets/coremltools"]
-	path = assets/coremltools
-	url = https://github.com/kentslaney/coremltools

@@ -4,11 +4,6 @@ device, but good at localization. Bounding boxes are expected to cover occluded
 areas.
 
 ## Install
-The coremltools compilation needs conda and zsh, but is only needed for the
-Apple Silicon export pipeline. Otherwise, it can be skipped and removed from the
-`requirements.txt`. Once `coremltools` releases a version newer than 9.0 to
-PyPI, the submodule can be switched back to a prebuild wheel.
-
 For execution in CUDA environments, `jax` has to be switched to `jax[cuda13]`.
 At some point, this process might end up streamlined via a `pyproject.toml`.
 
@@ -16,7 +11,6 @@ The submodule population can be skipped if the repo is cloned recursively.
 
 ```bash
 git submodule update --init
-sh assets/coremltools/scripts/build.sh --python=3.12
 python -m venv env
 env/bin/pip install -r requirements.txt
 ```
