@@ -8,14 +8,15 @@ The submodule population can be skipped if the repo is cloned recursively.
 
 ```bash
 git submodule update --init
-python -m venv env
-env/bin/pip install -e .
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
 ```
 
 For execution in CUDA environments:
 
 ```bash
-env/bin/pip install -e ".[cuda]"
+pip install -e ".[cuda]"
 ```
 
 ## Snippets
