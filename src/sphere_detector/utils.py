@@ -61,9 +61,10 @@ def lazy_default(**lazy):
 
 def kron_bool(a, b):
     assert a.ndim == 2 and b.ndim == 2
-    a_upscaled = jnp.repeat(jnp.repeat(a, b.shape[0], 0), b.shape[1], 1)
-    b_tiled = jnp.tile(b, a.shape)
-    return jnp.logical_and(a_upscaled, b_tiled)
+    return jnp.reshape(
+        jnp.logical_and(a[:, None, :, None], b[None, :, None, :]),
+        (a.shape[0] * b.shape[0], a.shape[1] * b.shape[1]))
+
 
 patch_label = "patch_tag_runtime_callsite"
 patch_sep = ".<locals>."
