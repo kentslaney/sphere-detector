@@ -10,3 +10,4 @@ __pycache__
 /dist
 /.vscode/*
 !/.vscode/settings.json
+/.agent/apis
