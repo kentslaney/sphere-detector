@@ -500,8 +500,23 @@ class Seives:  # Feature Pyramid
             fn = layer.unshift
         return tuple(out[::-1])
 
+    # StableHLO
+    def bitpacked(self, x):
+        return jnp.uint16(x)
+
+    bit_density = 1
+
+    # CoreML
+    def bitpacked(self, val):
+        out = 0
+        for i in range(16):
+            bit = (val >> i) & 1
+            out |= (bit << (2 * i))
+        return jnp.int32(out)
+
+    bit_density = 2
+
     @jax.jit(static_argnames=["level"])
-    @patch_tag("early_nms")
     def nms(self, level):
         if not self.config.early_nms:
             return True
@@ -529,7 +544,7 @@ class Seives:  # Feature Pyramid
         # Apply the base suppression kernels (group 3) unconditionally
         for a, k_val in zip(strides, kernel_masks[3]):
             subgrid = a(self.stack[level + 1].primaries)
-            out[3].append(jnp.where(subgrid, jnp.uint16(k_val), jnp.uint16(0)))
+            out[3].append(jnp.where(subgrid, self.bitpacked(k_val), self.bitpacked(0)))
         # Compute masks based on the "ruler" function to determine common ancestor distance
         mask1lo   = self.ruler_0th[0][level][:, None]
         mask1hi   = self.ruler_0th[1][level][:, None]
@@ -548,7 +563,7 @@ class Seives:  # Feature Pyramid
             for bound, a, k_val in zip(masks[i], strides, kernel_masks[i]):
                 mask = a(self.pyramids[level]) >= bound
                 mask = jnp.logical_and(mask, a(self.stack[level + 1].primaries))
-                out[i].append(jnp.where(mask, jnp.uint16(k_val), jnp.uint16(0)))
+                out[i].append(jnp.where(mask, self.bitpacked(k_val), self.bitpacked(0)))
         # Aggregate suppression masks from all kernel groups in uint16 (exact disjoint bit sets)
         ll_u16 = out[0][0] + out[1][0] + out[2][0] + out[3][0]
         lh_u16 = out[0][1] + out[1][1] + out[2][1] + out[3][1]
@@ -556,29 +571,29 @@ class Seives:  # Feature Pyramid
         hh_u16 = out[0][3] + out[1][3] + out[2][3] + out[3][3]
 
         # Apply spatial shifts directly in packed word space
-        ll = ((ll_u16 & jnp.uint16(0x0777)) << 5) + \
-             ((shift_grid(ll_u16, 0, -1) & jnp.uint16(0x7000)) >> 11) + \
-             ((shift_grid(ll_u16, -1, 0) & jnp.uint16(0x0888)) << 1) + \
-             ((shift_grid(ll_u16, -1, -1) & jnp.uint16(0x8000)) >> 15)
+        ll = ((ll_u16 & self.bitpacked(0x0777)) << (self.bit_density * 5)) + \
+             ((shift_grid(ll_u16, 0, -1) & self.bitpacked(0x7000)) >> (self.bit_density * 11)) + \
+             ((shift_grid(ll_u16, -1, 0) & self.bitpacked(0x0888)) << (self.bit_density * 1)) + \
+             ((shift_grid(ll_u16, -1, -1) & self.bitpacked(0x8000)) >> (self.bit_density * 15))
 
-        lh = ((shift_grid(lh_u16, 0, 1) & jnp.uint16(0x0007)) << 13) + \
-             ((lh_u16 & jnp.uint16(0x7770)) >> 3) + \
-             ((shift_grid(lh_u16, -1, 1) & jnp.uint16(0x0008)) << 9) + \
-             ((shift_grid(lh_u16, -1, 0) & jnp.uint16(0x8880)) >> 7)
+        lh = ((shift_grid(lh_u16, 0, 1) & self.bitpacked(0x0007)) << (self.bit_density * 13)) + \
+             ((lh_u16 & self.bitpacked(0x7770)) >> (self.bit_density * 3)) + \
+             ((shift_grid(lh_u16, -1, 1) & self.bitpacked(0x0008)) << (self.bit_density * 9)) + \
+             ((shift_grid(lh_u16, -1, 0) & self.bitpacked(0x8880)) >> (self.bit_density * 7))
 
-        hl = ((shift_grid(hl_u16, 1, 0) & jnp.uint16(0x0111)) << 7) + \
-             ((shift_grid(hl_u16, 1, -1) & jnp.uint16(0x1000)) >> 9) + \
-             ((hl_u16 & jnp.uint16(0x0EEE)) << 3) + \
-             ((shift_grid(hl_u16, 0, -1) & jnp.uint16(0xE000)) >> 13)
+        hl = ((shift_grid(hl_u16, 1, 0) & self.bitpacked(0x0111)) << (self.bit_density * 7)) + \
+             ((shift_grid(hl_u16, 1, -1) & self.bitpacked(0x1000)) >> (self.bit_density * 9)) + \
+             ((hl_u16 & self.bitpacked(0x0EEE)) << (self.bit_density * 3)) + \
+             ((shift_grid(hl_u16, 0, -1) & self.bitpacked(0xE000)) >> (self.bit_density * 13))
 
-        hh = ((shift_grid(hh_u16, 1, 1) & jnp.uint16(0x0001)) << 15) + \
-             ((shift_grid(hh_u16, 1, 0) & jnp.uint16(0x1110)) >> 1) + \
-             ((shift_grid(hh_u16, 0, 1) & jnp.uint16(0x000E)) << 11) + \
-             ((hh_u16 & jnp.uint16(0xEEE0)) >> 5)
+        hh = ((shift_grid(hh_u16, 1, 1) & self.bitpacked(0x0001)) << (self.bit_density * 15)) + \
+             ((shift_grid(hh_u16, 1, 0) & self.bitpacked(0x1110)) >> (self.bit_density * 1)) + \
+             ((shift_grid(hh_u16, 0, 1) & self.bitpacked(0x000E)) << (self.bit_density * 11)) + \
+             ((hh_u16 & self.bitpacked(0xEEE0)) >> (self.bit_density * 5))
 
         # Combine all 4 shifted phases in packed word space and unpack once per layer
         reduced_u16 = (ll | hh) | (lh | hl)
-        reduced = unpack_u16_4x4(reduced_u16)
+        reduced = unpack_u16_4x4(reduced_u16, self.bit_density)
         suppressions = self.stack[level + 1].unshift(reduced, 2)
         allowed = jnp.logical_not(suppressions)
         candidates = jnp.logical_and(self.stack[level].primaries, allowed)
