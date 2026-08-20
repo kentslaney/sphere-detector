@@ -511,28 +511,23 @@ class Seives:  # Feature Pyramid
         #             or the the common ancestor is the first non-primary
         if level == len(self.stack) - 1:
             return self.stack[level].unshift(self.stack[level].primaries)
-        # 16-bit hex representations of 4x4 boolean kernels for suppression
         kernel_masks = [
             [0x8000, 0x0008, 0x1000, 0x0001],
             [0x0888, 0x8880, 0x0111, 0x1110],
             [0x7000, 0x0007, 0xe000, 0x000e],
             [0x0117, 0x7110, 0x088e, 0xe880]]
-        # Convert hex masks into actual 4x4 boolean JAX arrays
         kernels = [[
             jnp.array([[
                 bool(((j >> (n * 4)) & 0xF) & (1 << m))
                 for n in range(3, -1, -1)] for m in range(3, -1, -1)])
             for j in i] for i in kernel_masks]
-        # Slicing functions to extract 4 subgrids (even/odd rows/cols) for a 2x2 stride
         strides = [
                 (lambda *a: (lambda x: jax.lax.slice(x, a, x.shape, (2, 2))))(
                     i, j) for i in range(2) for j in range(2)]
         masks = [None] * 3
         out = ([], [], [], [])
-        # Apply the base suppression kernels (group 3) unconditionally
         for a, b in zip(strides, kernels[3]):
             out[3].append(kron_bool(a(self.stack[level + 1].primaries), b))
-        # Compute masks based on the "ruler" function to determine common ancestor distance
         mask1lo   = self.ruler_0th[0][level][:, None]
         mask1hi   = self.ruler_0th[1][level][:, None]
         masks[1] = [mask1lo, mask1lo, mask1hi, mask1hi]
@@ -545,13 +540,11 @@ class Seives:  # Feature Pyramid
                 (self.ruler_0th[1][level], self.ruler_1st[0][level]),
                 (self.ruler_0th[1][level], self.ruler_1st[1][level])]
         masks[0] = [jax.lax.max(*jnp.meshgrid(x, y)) for y, x in mask0prod]
-        # Apply the conditional suppression kernels (groups 0-2) using the computed ancestor masks
         for i, (mask, kernel) in enumerate(zip(masks, kernels[:3])):
             for bound, a, b in zip(mask, strides, kernel):
                 mask = a(self.pyramids[level]) >= bound
                 mask = jnp.logical_and(mask, a(self.stack[level + 1].primaries))
                 out[i].append(kron_bool(mask, b))
-        # Aggregate suppression masks from all kernel groups
         ll_all = jnp.logical_or(
             jnp.logical_or(out[0][0], out[1][0]),
             jnp.logical_or(out[2][0], out[3][0]))
@@ -565,8 +558,6 @@ class Seives:  # Feature Pyramid
             jnp.logical_or(out[0][3], out[1][3]),
             jnp.logical_or(out[2][3], out[3][3]))
 
-        # Apply spatial shifts to the aggregated masks so that suppressors align with target candidates
-        # Shift bottom-right (-1, -1)
         ll = jnp.concatenate((
             ll_all[1:, :],
             jnp.zeros((1, ll_all.shape[1]), dtype=bool)), 0)
@@ -574,7 +565,6 @@ class Seives:  # Feature Pyramid
             ll[:, 1:],
             jnp.zeros((ll.shape[0], 1), dtype=bool)), 1)
 
-        # Shift bottom-left (-1, +1)
         lh = jnp.concatenate((
             lh_all[1:, :],
             jnp.zeros((1, lh_all.shape[1]), dtype=bool)), 0)
@@ -582,7 +572,6 @@ class Seives:  # Feature Pyramid
             jnp.zeros((lh.shape[0], 1), dtype=bool),
             lh[:, :-1]), 1)
 
-        # Shift top-right (+1, -1)
         hl = jnp.concatenate((
             jnp.zeros((1, hl_all.shape[1]), dtype=bool),
             hl_all[:-1, :]), 0)
@@ -590,7 +579,6 @@ class Seives:  # Feature Pyramid
             hl[:, 1:],
             jnp.zeros((hl.shape[0], 1), dtype=bool)), 1)
 
-        # Shift top-left (+1, +1)
         hh = jnp.concatenate((
             jnp.zeros((1, hh_all.shape[1]), dtype=bool),
             hh_all[:-1, :]), 0)
@@ -598,7 +586,6 @@ class Seives:  # Feature Pyramid
             jnp.zeros((hh.shape[0], 1), dtype=bool),
             hh[:, :-1]), 1)
 
-        # Combine shifted suppression masks and apply to the candidates
         reduced = jnp.logical_or(
             jnp.logical_or(ll, hh),
             jnp.logical_or(lh, hl))
