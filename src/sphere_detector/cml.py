@@ -99,10 +99,90 @@ DefaultConverter = StableHloConverter
 class RegisteredConverter(DefaultConverter):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
+        self._stablehlo_ops_registry[OrOp] = self.op_or.__func__
+        self._stablehlo_ops_registry[AndOp] = self.op_and.__func__
+        self._stablehlo_ops_registry[ShiftLeftOp] = self.op_shl.__func__
+        self._stablehlo_ops_registry[ShiftRightLogicalOp] = self.op_shr.__func__
+        self._stablehlo_ops_registry[ShiftRightArithmeticOp] = self.op_shr.__func__
+        self._stablehlo_ops_registry[ConstantOp] = self.op_constant.__func__
+        self._stablehlo_ops_registry[ConvertOp] = self.op_convert.__func__
+
         for register in ['_stablehlo_ops_registry', '_composite_ops_registry']:
             setattr(self, register, {
                 **getattr(DefaultConverter, register),
                 **getattr(self, register, {})})
+
+    def op_constant(self, context, op):
+        constant = np.array(op.value)
+        constant = np.reshape(constant, op.result.type.shape)
+        if constant.dtype in (np.uint8, np.uint16, np.uint32, np.int8, np.int16):
+            constant = constant.astype(np.int32)
+        context.add_result(op.result, mb.const(val=constant))
+
+    def op_convert(self, context, op):
+        x = context[op.operand.get_name()]
+        new_dtype = get_mil_type_from_ir(op.result.type.element_type)
+        if new_dtype in (types.uint8, types.uint16, types.uint32, types.int8, types.int16):
+            new_dtype = types.int32
+        cml_op = mb.cast(x=x, dtype=types.builtin_to_string(new_dtype))
+        context.add_result(op.result, cml_op)
+
+    def op_shl(self, context, op):
+        lhs = context[op.lhs.get_name()]
+        rhs = context[op.rhs.get_name()]
+        two = mb.const(val=np.int32(2))
+        multiplier = mb.pow(x=two, y=rhs)
+        multiplier = mb.cast(x=multiplier, dtype=types.builtin_to_string(lhs.dtype))
+        res = mb.mul(x=lhs, y=multiplier)
+        context.add_result(op.result, res)
+
+    def op_shr(self, context, op):
+        lhs = context[op.lhs.get_name()]
+        rhs = context[op.rhs.get_name()]
+        two = mb.const(val=np.int32(2))
+        divisor = mb.pow(x=two, y=rhs)
+        divisor = mb.cast(x=divisor, dtype=types.builtin_to_string(lhs.dtype))
+        res = mb.real_div(x=lhs, y=divisor)
+        res = mb.cast(x=res, dtype=types.builtin_to_string(lhs.dtype))
+        context.add_result(op.result, res)
+
+    def op_or(self, context: TranslationContext, op: OrOp):
+        lhs = context[op.lhs.get_name()]
+        rhs = context[op.rhs.get_name()]
+        if types.is_bool(lhs.dtype):
+            assert types.is_bool(rhs.dtype)
+            cml_op = mb.logical_or(x=lhs, y=rhs)
+            context.add_result(op.result, cml_op)
+        else:
+            divisors = mb.const(val=np.array([1 << (i * 2) for i in range(16)], dtype=np.int32))
+            two = mb.const(val=np.int32(2))
+            zero = mb.const(val=np.int32(0))
+            a_exp = mb.expand_dims(x=lhs, axes=[-1])
+            b_exp = mb.expand_dims(x=rhs, axes=[-1])
+            bits_a = mb.not_equal(x=mb.mod(x=mb.real_div(x=a_exp, y=divisors), y=two), y=zero)
+            bits_b = mb.not_equal(x=mb.mod(x=mb.real_div(x=b_exp, y=divisors), y=two), y=zero)
+            bits_or = mb.cast(x=mb.logical_or(x=bits_a, y=bits_b), dtype="int32")
+            res = mb.reduce_sum(x=mb.mul(x=bits_or, y=divisors), axes=[-1], keep_dims=False)
+            context.add_result(op.result, res)
+
+    def op_and(self, context: TranslationContext, op: AndOp):
+        lhs = context[op.lhs.get_name()]
+        rhs = context[op.rhs.get_name()]
+        if types.is_bool(lhs.dtype):
+            assert types.is_bool(rhs.dtype)
+            cml_op = mb.logical_and(x=lhs, y=rhs)
+            context.add_result(op.result, cml_op)
+        else:
+            divisors = mb.const(val=np.array([1 << (i * 2) for i in range(16)], dtype=np.int32))
+            two = mb.const(val=np.int32(2))
+            zero = mb.const(val=np.int32(0))
+            a_exp = mb.expand_dims(x=lhs, axes=[-1])
+            b_exp = mb.expand_dims(x=rhs, axes=[-1])
+            bits_a = mb.not_equal(x=mb.mod(x=mb.real_div(x=a_exp, y=divisors), y=two), y=zero)
+            bits_b = mb.not_equal(x=mb.mod(x=mb.real_div(x=b_exp, y=divisors), y=two), y=zero)
+            bits_and = mb.cast(x=mb.logical_and(x=bits_a, y=bits_b), dtype="int32")
+            res = mb.reduce_sum(x=mb.mul(x=bits_and, y=divisors), axes=[-1], keep_dims=False)
+            context.add_result(op.result, res)
 
     def default_dispatch(self, context, op):
         return DefaultConverter._dispatch_op(self, context, op)
@@ -154,44 +234,6 @@ class TagPatcher(RegisteredConverter):
             if depth == 0 and hasattr(self.tag_map, tag):
                 return getattr(self.tag_map, tag)(self, context, op)
         return self.default_dispatch(context, op)
-
-    @register_stablehlo_op
-    def op_or(self, context: TranslationContext, op: OrOp):
-        lhs = context[op.lhs.get_name()]
-        rhs = context[op.rhs.get_name()]
-        if types.is_bool(lhs.dtype):
-            cml_op = mb.logical_or(x=lhs, y=rhs)
-            context.add_result(op.result, cml_op)
-        else:
-            divisors = mb.const(val=np.array([1 << (i * 2) for i in range(16)], dtype=np.int32))
-            two = mb.const(val=np.int32(2))
-            zero = mb.const(val=np.int32(0))
-            a_exp = mb.expand_dims(x=lhs, axes=[-1])
-            b_exp = mb.expand_dims(x=rhs, axes=[-1])
-            bits_a = mb.not_equal(x=mb.mod(x=mb.real_div(x=a_exp, y=divisors), y=two), y=zero)
-            bits_b = mb.not_equal(x=mb.mod(x=mb.real_div(x=b_exp, y=divisors), y=two), y=zero)
-            bits_or = mb.cast(x=mb.logical_or(x=bits_a, y=bits_b), dtype="int32")
-            res = mb.reduce_sum(x=mb.mul(x=bits_or, y=divisors), axes=[-1], keep_dims=False)
-            context.add_result(op.result, res)
-
-    @register_stablehlo_op
-    def op_and(self, context: TranslationContext, op: AndOp):
-        lhs = context[op.lhs.get_name()]
-        rhs = context[op.rhs.get_name()]
-        if types.is_bool(lhs.dtype):
-            cml_op = mb.logical_and(x=lhs, y=rhs)
-            context.add_result(op.result, cml_op)
-        else:
-            divisors = mb.const(val=np.array([1 << (i * 2) for i in range(16)], dtype=np.int32))
-            two = mb.const(val=np.int32(2))
-            zero = mb.const(val=np.int32(0))
-            a_exp = mb.expand_dims(x=lhs, axes=[-1])
-            b_exp = mb.expand_dims(x=rhs, axes=[-1])
-            bits_a = mb.not_equal(x=mb.mod(x=mb.real_div(x=a_exp, y=divisors), y=two), y=zero)
-            bits_b = mb.not_equal(x=mb.mod(x=mb.real_div(x=b_exp, y=divisors), y=two), y=zero)
-            bits_and = mb.cast(x=mb.logical_and(x=bits_a, y=bits_b), dtype="int32")
-            res = mb.reduce_sum(x=mb.mul(x=bits_and, y=divisors), axes=[-1], keep_dims=False)
-            context.add_result(op.result, res)
 
 class MilInjector(TagPatcher):
     def process_block(self, context, block):

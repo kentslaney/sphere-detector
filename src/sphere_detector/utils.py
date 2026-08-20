@@ -68,7 +68,7 @@ def kron_bool(a, b):
 
 _U16_DIVISORS_4X4 = lambda density: jnp.array(
     [[1 << (density * ((3 - c) * 4 + (3 - r))) for c in range(4)] for r in range(4)],
-    dtype=jnp.uint16)
+    dtype=jnp.uint16 if density == 1 else jnp.int32)
 
 def unpack_u16_4x4(u16_grid, density=1):
     bits = (u16_grid[:, None, :, None] // _U16_DIVISORS_4X4(density)[None, :, None, :]) % 2
