@@ -183,7 +183,10 @@ class Candidate(Wrapper):
                 self.confidence[i],
             ]])
         if self.name is not None:
-            res[0] = [self.name] + res[0]
+            if len(res):
+                res[0] = [self.name] + res[0]
+            else:
+                res = [[self.name]]
             for i in range(1, len(res)):
                 res[i] = [""] + res[i]
         return res
