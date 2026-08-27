@@ -1,7 +1,7 @@
 import sys, pathlib, inspect, re
 from collections import OrderedDict
 from functools import wraps
-import jax.numpy as jnp
+import jax, jax.numpy as jnp
 
 from PIL import Image
 from pillow_heif import register_heif_opener
