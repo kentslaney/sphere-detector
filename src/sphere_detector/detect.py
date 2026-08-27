@@ -10,6 +10,7 @@ from jax.scipy.optimize import minimize
 
 from .utils import lazy_default, jax_limit_cache, kron_bool, patch_tag, Image
 from .depth import Da2
+from PIL import ImageOps
 
 @partial(
         jax.tree_util.register_dataclass,
@@ -68,6 +69,7 @@ class Raster:  # image wrapper non-serializable for JAX
     @classmethod
     def file(cls, path, npy=None, **kw):
         im, cache = Image.open(path), None
+        im = ImageOps.exif_transpose(im)
         if npy is not None:
             npy = pathlib.Path(npy)
             if npy.exists():
