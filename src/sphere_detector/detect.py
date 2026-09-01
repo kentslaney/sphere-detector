@@ -44,9 +44,8 @@ class Config:  # hyperparameters
     chi: any = 0.5  # standard deviations above initial mean radius to look
 
     # Surface
-    # TODO: tune
     mu: any = 1.0  # edge RMSE coefficient (remember via lower case shape)
-    nu: any = 1.0  # depth slice RMSE coefficient
+    nu: any = 0.3  # depth slice RMSE coefficient
 
     depth_checkpoint = "vits"
 
