@@ -50,6 +50,39 @@ class Da2:
                 self.model_url, map_location='cpu'))
         return model.to(DEVICE).eval()
 
-    def __call__(self, im):
+    def infer_direct(self, im):
+        """Run DepthAnythingV2 directly at native 1:1 resolution with zero resizing or bilinear interpolation."""
+        import torch
+        np_im = np.array(im)
+        if np_im.ndim == 2:
+            np_im = np.stack([np_im] * 3, axis=-1)
+        elif np_im.shape[2] == 4:
+            np_im = np_im[:, :, :3]
+
+        h, w = np_im.shape[:2]
+        pad_h = (14 - h % 14) % 14
+        pad_w = (14 - w % 14) % 14
+        pad_top, pad_bottom = pad_h // 2, pad_h - pad_h // 2
+        pad_left, pad_right = pad_w // 2, pad_w - pad_w // 2
+
+        im_float = np_im.astype(np.float32) / 255.0
+        im_padded = np.pad(im_float, ((pad_top, pad_bottom), (pad_left, pad_right), (0, 0)), mode="edge")
+
+        device = next(self.model.parameters()).device
+        mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32, device=device).view(1, 3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32, device=device).view(1, 3, 1, 1)
+
+        tensor = torch.from_numpy(im_padded).permute(2, 0, 1).unsqueeze(0).to(device)
+        tensor = (tensor - mean) / std
+
+        with torch.no_grad():
+            depth_out = self.model(tensor)
+
+        depth_np = depth_out.squeeze().cpu().numpy()
+        return jnp.array(depth_np[pad_top : pad_top + h, pad_left : pad_left + w])
+
+    def __call__(self, im, direct=False):
+        if direct:
+            return self.infer_direct(im)
         return jnp.array(self.model.infer_image(np.array(im)))
 

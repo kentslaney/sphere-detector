@@ -752,14 +752,16 @@ class AliasedRay:  # represents the curve centers to fit from
     @cached_property
     def adjacent(self):
         lo, hi = self.steps
-        oob = jnp.array(self.config.resolution)[:, None, None, None]
-        oob_lo = jnp.logical_or(lo < 0, lo >= oob)
-        oob_lo = jnp.logical_and(oob_lo[0], oob_lo[1])
-        oob_hi = jnp.logical_or(hi < 0, hi >= oob)
-        oob_hi = jnp.logical_and(oob_hi[0], oob_hi[1])
-        lo = jnp.where(oob_lo, jnp.nan, self.depth[*lo])
-        hi = jnp.where(oob_hi, jnp.nan, self.depth[*hi])
-        return (lo, hi)
+        shape = jnp.array(self.depth.shape)[:, None, None, None]
+        oob_lo = jnp.logical_or(lo < 0, lo >= shape)
+        oob_lo = jnp.logical_or(oob_lo[0], oob_lo[1])
+        oob_hi = jnp.logical_or(hi < 0, hi >= shape)
+        oob_hi = jnp.logical_or(oob_hi[0], oob_hi[1])
+        lo_clamped = jnp.clip(lo, 0, shape - 1)
+        hi_clamped = jnp.clip(hi, 0, shape - 1)
+        lo_val = jnp.where(oob_lo, jnp.nan, self.depth[*lo_clamped])
+        hi_val = jnp.where(oob_hi, jnp.nan, self.depth[*hi_clamped])
+        return (lo_val, hi_val)
 
     @cached_property
     def occludes(self):
