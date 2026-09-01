@@ -12,8 +12,8 @@ model = ct.models.MLModel(spec, weights_dir=cml_model.weights_dir)
 
 model.input_description["depth"] = (
     "Estimated, unitless depth map, as a grayscale image. "
-    "Proportional to LiDaR raycast distance to projection plane "
-    "as formatted by the KITTI dataset."
+    "Inversely proportional to LiDaR raycast distance to projection plane "
+    "as formatted by the KITTI dataset (matching DepthAnything2)."
 )
 model.output_description["coordinates"] = (
     "1 \xd7 CENTER_SIZE_WIDTH_FIRST \xd7 Boxes as proportions"
@@ -29,7 +29,7 @@ model.output_description["confidence"] = (
 
 model.author = "Kent Slaney"
 model.license = "CC0"
-model.version = "1.1.0"
+model.version = "1.1.1"
 model.short_description = (
     "Looks for 3d curves, "
     "fits a circle to surrounding depth drop-offs, then "
