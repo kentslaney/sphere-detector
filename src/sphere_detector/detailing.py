@@ -11,9 +11,12 @@ ct.utils.rename_feature(spec, next(it), 'coordinates')
 model = ct.models.MLModel(spec, weights_dir=cml_model.weights_dir)
 
 model.input_description["depth"] = (
-    "Estimated, unitless depth map, as a grayscale image. "
-    "Proportional to LiDaR raycast distance to projection plane "
-    "as formatted by the KITTI dataset."
+    "Estimated, unitless inverse depth map, as a grayscale image. "
+    "Larger values are nearer, as emitted by Depth Anything V2. "
+    "Affine-invariant: scale and shift are arbitrary and need not be known. "
+    "Note this is the reciprocal of a KITTI depth map, which stores LiDaR "
+    "raycast distance to the projection plane; supplying distance nominates "
+    "nothing rather than reporting an error."
 )
 model.output_description["coordinates"] = (
     "1 \xd7 CENTER_SIZE_WIDTH_FIRST \xd7 Boxes as proportions"
