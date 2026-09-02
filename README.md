@@ -19,6 +19,9 @@ For execution in CUDA environments:
 pip install -e ".[cuda]"
 ```
 
+## test footage source
+https://redd.it/1w41qv2
+
 ## Snippets
 The main CLI will run on the reference images in
 [assets/examples](./assets/examples) that were used for development. The demo
