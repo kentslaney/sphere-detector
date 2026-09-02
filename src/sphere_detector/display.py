@@ -138,8 +138,12 @@ class Sampled(Wrapper):
         kw = {
                 'linewidth': 2, 'edgecolor': 'r', 'facecolor': 'none',
                 'zorder': 5 }
+
+        xlim0, ylim0 = ax.get_xlim(), ax.get_ylim()
         ax.add_patch(patches.Circle(
             (self.surface.x_c, y_c[index]), self.fit.radius[index], **kw))
+        ax.set_xlim(xlim0)
+        ax.set_ylim(ylim0)
 
         name = " " if self.name is None else f" {self.name} "
         msg = (
@@ -148,9 +152,9 @@ class Sampled(Wrapper):
             f'n: {self.fit.samples[index]} / {self.surface.config.rays}'
         )
         ax.text(
-                0.05, 0.05, msg,
+                0.05, 0.95, msg,
                 transform=ax.transAxes,
-                verticalalignment='bottom',
+                verticalalignment='top',
                 horizontalalignment='left',
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.5))
         ax.set_title(f"Surface Depths for{name}Sphere Candidate {index}")
