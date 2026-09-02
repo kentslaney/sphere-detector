@@ -769,16 +769,16 @@ class AliasedRay:  # represents the curve centers to fit from
     def occludes(self):
         res = [None, None]
         for i, series in enumerate(self.adjacent):
-            hi = self.depth_mean + self.config.alpha * self.depth_std
-            lo = self.depth_mean - self.config.beta * self.depth_std
+            lo = self.depth_mean - self.config.alpha * self.depth_std
+            hi = self.depth_mean + self.config.beta * self.depth_std
             lim = self.radius_mean + self.config.chi * self.radius_std
 
             lo, hi = lo[:, None, None], hi[:, None, None]
             lim = lim[:, None, None]
             near, far = series[..., :-1], series[..., 1:]
             valid = jnp.logical_and(near >= lo, near < hi)
-            bound = -self.config.delta * self.depth_std[:, None, None]
-            lowers = far - near < bound
+            bound = self.config.delta * self.depth_std[:, None, None]
+            lowers = far - near > bound
             expected = jnp.arange(self.distance - 1)[None, None] < lim
             edge = jnp.logical_and(expected, jnp.logical_and(valid, lowers))
             res[i] = jax.lax.reduce_min(jnp.where(
