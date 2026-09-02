@@ -3,6 +3,8 @@ Not quite fast enough for real-time, full-resolution inference on an edge
 device, but good at localization. Bounding boxes are expected to cover occluded
 areas.
 
+<img width="1280" height="640" alt="debug_frame_00000_ball_0" src="https://github.com/user-attachments/assets/36281dac-b940-490f-b110-159841f804ca" />
+
 ## Install
 The submodule population can be skipped if the repo is cloned recursively.
 
