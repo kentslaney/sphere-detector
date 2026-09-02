@@ -3,6 +3,10 @@ import cv2
 from PIL import Image
 from typing import Optional, List, Tuple, Union, Dict, Any
 import jax.numpy as jnp
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 from src.sphere_detector.detect import Raster, Config
 from src.sphere_detector.depth import Da2
@@ -14,7 +18,6 @@ class SphereDetectorWrapper:
     def __init__(
         self,
         encoder: str = "vits",
-        da2_input_size: int = 728,
         min_crop_radius: int = 32,
         crop_scale: float = 1.5,
         subdivisions: int = 4
@@ -24,13 +27,11 @@ class SphereDetectorWrapper:
         
         Args:
             encoder: DepthAnythingV2 encoder ('vits', 'vitb', etc.)
-            da2_input_size: Resolution for DepthAnythingV2 inference (default: 728 for 720p native full-res)
             min_crop_radius: Minimum half-width/height for tight candidate crops
             crop_scale: Multiplier on candidate box size for crop window
             subdivisions: Number of subdivisions in Seives feature pyramid
         """
         self.encoder = encoder
-        self.da2_input_size = da2_input_size
         self.min_crop_radius = min_crop_radius
         self.crop_scale = crop_scale
         self.subdivisions = subdivisions
@@ -130,16 +131,18 @@ class SphereDetectorWrapper:
         zoom: int = 5
     ) -> np.ndarray:
         """
-        Generate a 4-stage debug visualization panel (RGB, Depth, Binned Counts, Circle/Ray Fit).
-        
+        Generate a multi-stage debug visualization panel:
+          - Top row: 4 image stages (RGB Crop, Depth DA2, Binned Counts, Circle/Ray Fit).
+          - Bottom row: Graph of aliased ray depth slices (Green: resolved, Red: unresolved).
+          
         Args:
             frame_rgb: Full resolution RGB frame (H, W, 3)
             candidate_box: Initial bounding box [y1, x1, y2, x2]
             depth_full: Full-resolution depth map
-            zoom: Magnification factor
+            zoom: Magnification factor for top image strip
             
         Returns:
-            BGR debug strip image (H * zoom, 4 * W * zoom, 3)
+            BGR combined debug image
         """
         if depth_full is None:
             depth_full = self.compute_depth(frame_rgb)
@@ -169,16 +172,14 @@ class SphereDetectorWrapper:
             extent=2
         )
 
-        # 1. Binned counts map
+        # 1. Top Image Strip Panels
         counts = np.array(r.depth.binned().counts)
         counts_norm = np.uint8(counts / (np.max(counts) + 1e-8) * 255)
         counts_color = cv2.applyColorMap(counts_norm, cv2.COLORMAP_JET)
 
-        # 2. Depth map visualization
         d_norm = np.uint8((crop_depth - crop_depth.min()) / (crop_depth.max() - crop_depth.min() + 1e-8) * 255)
         depth_color = cv2.applyColorMap(d_norm, cv2.COLORMAP_INFERNO)
 
-        # 3. Outline dropoff points & circle fit
         opt = r.opt(1)
         fit = opt.fit
         trace = opt.points
@@ -194,7 +195,6 @@ class SphereDetectorWrapper:
 
         c_y, c_x, c_r = float(fit.center_0th[0]), float(fit.center_1st[0]), float(fit.radius[0])
 
-        # Draw rays from center to dropoff points
         for py, px, v in zip(pts_y, pts_x, pts_valid):
             if v and not np.isnan(py) and not np.isnan(px):
                 pt_screen = (int(round(px * zoom)), int(round(py * zoom)))
@@ -203,24 +203,78 @@ class SphereDetectorWrapper:
                 cv2.circle(z_overlay, pt_screen, 4, (255, 0, 255), -1)
                 cv2.circle(z_overlay, pt_screen, 5, (0, 0, 0), 1)
 
-        # Draw fitted circle in yellow/cyan
         if not np.isnan(c_y) and not np.isnan(c_x) and c_r > 0:
             cv2.circle(z_overlay, (int(round(c_x * zoom)), int(round(c_y * zoom))), int(round(c_r * zoom)), (0, 255, 255), 2)
             cv2.drawMarker(z_overlay, (int(round(c_x * zoom)), int(round(c_y * zoom))), (0, 255, 255), cv2.MARKER_CROSS, 10, 2)
 
-        # Draw initial heuristic box in green
         hx1 = int((x1 - cx1) * zoom)
         hy1 = int((y1 - cy1) * zoom)
         hx2 = int((x2 - cx1) * zoom)
         hy2 = int((y2 - cy1) * zoom)
         cv2.rectangle(z_overlay, (hx1, hy1), (hx2, hy2), (0, 255, 0), 2)
 
-        # Add panel titles
         cv2.putText(z_rgb, "1. RGB Crop", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(z_depth, "2. Depth (DA2)", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(z_counts, "3. Binned Counts", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         samples_count = int(fit.samples[0]) if not np.isnan(fit.samples[0]) else 0
-        r_str = f"r={c_r:.1f}px" if not np.isnan(c_r) else "no fit"
+        r_str = f"r={c_r:.1f}px" if not np.isnan(c_r) and c_r > 0 else "no fit"
         cv2.putText(z_overlay, f"4. Fit ({samples_count} pts, {r_str})", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
 
-        return np.hstack([z_rgb, z_depth, z_counts, z_overlay])
+        top_strip = np.hstack([z_rgb, z_depth, z_counts, z_overlay])
+        strip_w = top_strip.shape[1]
+
+        # 2. Bottom Row: Depth Slice Ray Graph
+        lo_depths = np.array(opt.adjacent[0][0])
+        hi_depths = np.array(opt.adjacent[1][0])
+        ray_depths = (lo_depths + hi_depths) / 2.0
+        occludes = np.array(opt.occludes[0][0])
+
+        fig, ax = plt.subplots(figsize=(strip_w / 100.0, 3.2), dpi=100)
+        fig.patch.set_facecolor("#0e0e14")
+        ax.set_facecolor("#161622")
+
+        distances = np.arange(ray_depths.shape[1])
+        # Plot unresolved rays in solid blue
+        for i in range(len(pts_valid)):
+            if not pts_valid[i]:
+                ax.plot(distances, ray_depths[i], color="#3388ff", alpha=0.4, linewidth=1.1, linestyle="-")
+
+        # Plot resolved rays in green
+        for i in range(len(pts_valid)):
+            if pts_valid[i]:
+                ax.plot(distances, ray_depths[i], color="#00ff88", alpha=0.85, linewidth=1.6)
+                step_idx = int(np.clip(occludes[i], 0, len(distances) - 1))
+                ax.scatter(step_idx, ray_depths[i, step_idx], color="#ff00ff", s=35, zorder=5, edgecolors="#ffffff", linewidth=0.8)
+
+        if not np.isnan(c_r) and c_r > 0:
+            ax.axvline(x=c_r, color="#ffff00", linestyle=":", linewidth=2, label=f"Fitted Radius ({c_r:.1f}px)")
+
+        ax.tick_params(colors="#cccccc", labelsize=9)
+        for spine in ax.spines.values():
+            spine.set_color("#3a3a4c")
+        ax.grid(True, color="#2a2a3c", linestyle="--", alpha=0.6)
+        ax.set_xlabel("Ray Step Distance (pixels from center)", color="#ffffff", fontsize=10)
+        ax.set_ylabel("Depth Disparity", color="#ffffff", fontsize=10)
+        resolved_count = int(np.sum(pts_valid))
+        unresolved_count = len(pts_valid) - resolved_count
+        ax.set_title(f"Ray Depth Slices (Green: {resolved_count} Resolved Dropoffs, Blue: {unresolved_count} Unresolved Rays, Magenta: Occlusion Edge)", color="#ffffff", fontsize=11, pad=8)
+
+        legend_elements = [
+            Line2D([0], [0], color="#00ff88", lw=2, label=f"Resolved ({resolved_count})"),
+            Line2D([0], [0], color="#3388ff", lw=1.5, label=f"Unresolved ({unresolved_count})"),
+            Line2D([0], [0], marker="o", color="w", markerfacecolor="#ff00ff", markersize=6, label="Dropoff Edge"),
+        ]
+        if not np.isnan(c_r) and c_r > 0:
+            legend_elements.append(Line2D([0], [0], color="#ffff00", linestyle=":", lw=2, label=f"Fitted r={c_r:.1f}px"))
+        ax.legend(handles=legend_elements, loc="upper right", facecolor="#1e1e2c", edgecolor="#3a3a4c", labelcolor="#ffffff", fontsize=8)
+
+        plt.tight_layout()
+        fig.canvas.draw()
+        plot_rgba = np.asarray(fig.canvas.buffer_rgba())
+        plot_bgr = cv2.cvtColor(plot_rgba, cv2.COLOR_RGBA2BGR)
+        plt.close(fig)
+
+        if plot_bgr.shape[1] != strip_w:
+            plot_bgr = cv2.resize(plot_bgr, (strip_w, plot_bgr.shape[0]), interpolation=cv2.INTER_AREA)
+
+        return np.vstack([top_strip, plot_bgr])
