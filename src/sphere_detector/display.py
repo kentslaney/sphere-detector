@@ -32,12 +32,15 @@ class Example(Wrapper):
         return obj
 
     def export_depth(self, path=local / "dist" / "preview.tiff"):
-        lo, hi = jnp.min(self.depth.depth), jnp.max(self.depth.depth)
-        rescaled = (self.depth.depth - lo) / (hi - lo)
-        Image.fromarray(np.array(rescaled)).save(path)
+        Image.fromarray(np.array(self.depth.cache)).save(path)
 
     def cropped_background(self, fig=None):
         return poplt(fig, lambda ax: ax.imshow(self.cropped()))
+
+    def draw_metric(self):
+        for layer in self.seives.stack:
+            plt.imshow(layer.bounds.metric)
+            plt.show()
 
     def draw_sifted(self, fig=None, color='r'):
         fig, ax = self.cropped_background(fig)

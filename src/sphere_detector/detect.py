@@ -23,6 +23,7 @@ from PIL import ImageOps
 class Config:  # hyperparameters
     # Raster
     resolution: any = (392, 518)  # (r, c) downsampling resolution
+    # resolution: any = None
     subdivisions: any = 8  # minimum number of cells per dimension
     candidates: any = 8  # number of curves to trace
     rays: any = 64  # number of 2d points to fit
@@ -44,8 +45,9 @@ class Config:  # hyperparameters
     chi: any = 0.5  # standard deviations above initial mean radius to look
 
     # Surface
+    # TODO: tune
     mu: any = 1.0  # edge RMSE coefficient (remember via lower case shape)
-    nu: any = 0.3  # depth slice RMSE coefficient
+    nu: any = 1.0  # depth slice RMSE coefficient
 
     depth_checkpoint = "vits"
 
@@ -90,7 +92,7 @@ class Raster:  # image wrapper non-serializable for JAX
 
     @cached_property
     def depth(self):
-        return self.data(self.cache)
+        return self.data(1 / self.cache)
 
     @property
     def spec(self):
@@ -192,11 +194,14 @@ class Depth:  # JAX depth data entry point
         return inv @ self.hessian @ basis
 
     @cached_property
-    def inwards(self):
-        convex = jnp.logical_and(
-                jnp.linalg.det(self.rotated) > 0, self.rotated[..., 0, 0] < 0)
+    def convex(self):
         return jnp.logical_and(
-                convex, self.rotated[..., 0, 0] <= self.rotated[..., 1, 1])
+                jnp.linalg.det(self.rotated) > 0, self.rotated[..., 0, 0] >= 0)
+
+    @cached_property
+    def inwards(self):
+        return jnp.logical_and(
+                self.convex, self.rotated[..., 0, 0] >= self.rotated[..., 1, 1])
 
     @cached_property
     def flat_radius_over_norm(self):
