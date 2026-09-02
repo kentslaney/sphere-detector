@@ -37,9 +37,9 @@ class Config:  # hyperparameters
     phi: any = (1 + math.sqrt(5)) / 2  # metric dimensionality
 
     # AliasedRay
-    alpha: any = 0.5  # standard deviations above mean for ray start depth
+    alpha: any = 0.5  # standard deviations closer than mean for ray start depth
     # mean height vs center: 2 / 3 * r and standard deviation: sqrt(2) / 6 * r
-    beta: any = 3.0  # standard deviations below mean for ray start depth
+    beta: any = 3.0  # standard deviations further than mean for ray start depth
     gamma: any = 0.2  # interpolation value between median and mean for w
     delta: any = 0.5  # threshold in standard deviations for ray depth jump
     chi: any = 0.5  # standard deviations above initial mean radius to look
@@ -853,7 +853,7 @@ class AliasedRay:  # represents the curve centers to fit from
 
         y = jnp.concat(self.adjacent, axis=1) * self.w[:, None, None]
         y_c = jnp.mean(
-            y - jnp.sqrt(r ** 2 - jnp.minimum(x, r) ** 2), (1, 2),
+            y + jnp.sqrt(r ** 2 - jnp.minimum(x, r) ** 2), (1, 2),
             where=self.valid)
 
         residuals = jnp.sqrt(x ** 2 + (y - y_c[:, None, None]) ** 2) - r

@@ -104,8 +104,8 @@ class Example(Wrapper):
             for cast in side[-1]:
                 ax0.plot(cast)
         ax0.axhline(opt.depth_mean[0])
-        ax0.axhline(opt.depth_mean[0] + self.config.alpha * opt.depth_std[0])
-        ax0.axhline(opt.depth_mean[0] - self.config.beta * opt.depth_std[0])
+        ax0.axhline(opt.depth_mean[0] - self.config.alpha * opt.depth_std[0])
+        ax0.axhline(opt.depth_mean[0] + self.config.beta * opt.depth_std[0])
         ax0.axvline(opt.radius_mean[0] + self.config.chi * opt.radius_std[0])
 
         for side in opt.adjacent:
