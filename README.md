@@ -40,7 +40,7 @@ python -m src.sphere_detector.demo
 python -m src.sphere_detector.export
 ```
 
-The default output of the first one is
+A correct, but no longer current output is
 
 ```
 name      i          x         y          r    n       edge    surface
@@ -79,6 +79,7 @@ im8       2  242.872    214.135    10.7732    36   0.233249   0.580265  0.532831
 ```
 
 ## TODOs
+- Make sifting actually metric resolution invariant (full resolution broken)
 - Interface internals for [tracking](https://github.com/kentslaney/h264events)
   (starting as closed source, ideally a separate repo)
 - Verify behavior for a basketball net

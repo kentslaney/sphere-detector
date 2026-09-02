@@ -1,6 +1,6 @@
 import sys, pathlib, math, inspect
 from functools import cached_property, partial
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 from collections import namedtuple
 
 import jax
@@ -37,7 +37,7 @@ class Config:  # hyperparameters
     phi: any = (1 + math.sqrt(5)) / 2  # metric dimensionality
 
     # AliasedRay
-    alpha: any = 0.5  # standard deviations closer than mean for ray start depth
+    alpha: any = 0.1  # standard deviations closer than mean for ray start depth
     # mean height vs center: 2 / 3 * r and standard deviation: sqrt(2) / 6 * r
     beta: any = 3.0  # standard deviations further than mean for ray start depth
     gamma: any = 0.2  # interpolation value between median and mean for w
@@ -45,9 +45,8 @@ class Config:  # hyperparameters
     chi: any = 0.5  # standard deviations above initial mean radius to look
 
     # Surface
-    # TODO: tune
     mu: any = 1.0  # edge RMSE coefficient (remember via lower case shape)
-    nu: any = 1.0  # depth slice RMSE coefficient
+    nu: any = 0.3  # depth slice RMSE coefficient
 
     depth_checkpoint = "vits"
 
@@ -64,8 +63,12 @@ class Raster:  # image wrapper non-serializable for JAX
     config = Config()
     model = Da2
 
+    @cached_property
+    def sized_config(self):
+        return dataclass_replace(self.config, resolution=self.spec)
+
     def data(self, *a, **kw):
-        return Depth(self.config, *a, **kw)
+        return Depth(self.sized_config, *a, **kw)
 
     @classmethod
     def file(cls, path, npy=None, **kw):
@@ -137,7 +140,7 @@ class Raster:  # image wrapper non-serializable for JAX
     def opt(self, candidates):
         pred = self.stat(candidates)
         return AliasedRay.from_binstats(
-                self.depth, pred, self.config.rays, self.config.distance)
+                self.depth, pred, self.config.rays, self.sized_config.distance)
 
 @partial(
         jax.tree_util.register_dataclass,
