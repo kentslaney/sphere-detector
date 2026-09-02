@@ -36,7 +36,7 @@ class Config:  # hyperparameters
     phi: any = (1 + math.sqrt(5)) / 2  # metric dimensionality
 
     # AliasedRay
-    alpha: any = 0.0  # standard deviations above mean for ray start depth
+    alpha: any = 0.5  # standard deviations above mean for ray start depth
     # mean height vs center: 2 / 3 * r and standard deviation: sqrt(2) / 6 * r
     beta: any = 3.0  # standard deviations below mean for ray start depth
     gamma: any = 0.2  # interpolation value between median and mean for w
