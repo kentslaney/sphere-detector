@@ -6,7 +6,7 @@ from jax._src.lib.mlir import ir
 from jax._src.interpreters import mlir as jax_mlir
 from jax.export import export
 
-from stablehlo_coreml import DEFAULT_HLO_PIPELINE
+from stablehlo_coreml import build_pass_pipeline
 
 from .utils import dist
 from .cml import config, convert, jax_center_size_width_first
@@ -25,7 +25,7 @@ mil_args = mil_program.functions[
         mil_program.default_function_name].inputs.keys()
 mil_arg0 = next(iter(mil_args))
 
-pipeline = DEFAULT_HLO_PIPELINE
+pipeline = build_pass_pipeline()
 pipeline.set_options("common::const_elimination", {"skip_const_by_size": "1e2"})
 
 import logging

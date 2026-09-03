@@ -5,9 +5,7 @@ import coremltools as ct
 from dataclasses import dataclass
 from functools import partial
 
-from stablehlo_coreml.converter import (
-    StableHloConverter, register_optimizations
-)
+from stablehlo_coreml.converter import StableHloConverter
 from coremltools.converters.mil.mil import types
 from coremltools.converters.mil.mil import Builder as mb
 from jax._src.lib.mlir.dialects import hlo
@@ -80,7 +78,6 @@ def jax_center_size_width_first(x):
 
 # TODO: switch to a StableHLO custom_call
 def convert(module, patch_tags=True, patch_output=False):
-    register_optimizations()
     converter = UniqPatch if patch_output else TagPatcher
     if not patch_tags:
         converter.tag_map = None
