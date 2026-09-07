@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sphere-detector"
-version = "1.1.0"
+version = "1.2.1"
 description = "Sphere Detector (Depth Test)"
 readme = "README.md"
 requires-python = ">=3.10"
