@@ -78,5 +78,6 @@ def patch_tag(name):
                 return f(*a, **kw)
             return {name}
     """
-    exec(code.replace(code[:len(code) - len(code.lstrip())], "\n").rstrip())
-    return locals()[patch_label]
+    ns = {}
+    exec(code.replace(code[:len(code) - len(code.lstrip())], "\n").rstrip(), globals(), ns)
+    return ns[patch_label]
