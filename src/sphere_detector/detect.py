@@ -5,6 +5,7 @@ from collections import namedtuple
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.scipy.signal import correlate2d
 from jax.scipy.optimize import minimize
 
@@ -77,16 +78,22 @@ class Raster:  # image wrapper non-serializable for JAX
         if npy is not None:
             npy = pathlib.Path(npy)
             if npy.exists():
-                cache = jnp.load(npy)
+                if npy.suffix.lower() in ('.tiff', '.tif'):
+                    cache = jnp.array(np.array(Image.open(npy), dtype=np.float32))
+                else:
+                    cache = jnp.load(npy)
                 target = kw.get(
                         "resolution", getattr(cls.config, "resolution", None))
                 if jnp.any(cache.shape != im.size[::-1]) if target is None \
                         else jnp.any(cache.shape != target):
                     cache = None
         obj = cls(im, cache, **kw)
-        if npy is not None:
+        if npy is not None and not npy.exists():
             npy.parents[0].mkdir(parents=True, exist_ok=True)
-            jnp.save(npy, obj.cache)
+            if npy.suffix.lower() in ('.tiff', '.tif'):
+                Image.fromarray(np.array(obj.cache, dtype=np.float32)).save(npy, format='TIFF')
+            else:
+                jnp.save(npy, obj.cache)
         return obj
 
     @cached_property
