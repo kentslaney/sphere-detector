@@ -21,6 +21,12 @@ For execution in CUDA environments:
 pip install -e ".[cuda]"
 ```
 
+It's not currently built for Pypi installations and it doesn't export much so
+the quickstart still looks like
+```python
+from sphere_detector.examples import im4
+```
+
 ## Snippets
 The main CLI will run on the reference images in
 [assets/examples](./assets/examples) that were used for development. The demo
